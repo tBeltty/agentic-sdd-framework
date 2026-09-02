@@ -13,17 +13,17 @@ Autonomous AI coding agents (Claude Code, Antigravity, Cursor, Codex) possess hi
 The **Agentic SDD Framework** provides an educational and industrial operating system that transitions software engineering from prompt-and-pray development into verifiable **Spec-Driven Development (SDD)**.
 
 ```mermaid
-flowchart LR
-    subgraph VibeCoding["❌ Vibe Coding (High Entropy)"]
-        V1["Vague Prompt"] --> V2["Agent Guesses Stack"]
-        V2 --> V3["Unverified Multi-File Edits"]
-        V3 --> V4["Regression Cascade"]
+graph LR
+    subgraph VibeCoding [Vibe Coding - High Entropy]
+        V1[Vague Prompt] --> V2[Agent Guesses Stack]
+        V2 --> V3[Unverified Multi-File Edits]
+        V3 --> V4[Regression Cascade]
     end
 
-    subgraph AgenticSDD["✅ Agentic SDD (Deterministic)"]
-        S1["Constitution & Discovery"] --> S2["Specification (Lite or Rigor)"]
-        S2 --> S3["Atomic Tasks (P-T)"]
-        S3 --> S4["Verifiable Exit Gate"]
+    subgraph AgenticSDD [Agentic SDD - Deterministic]
+        S1[Constitution and Discovery] --> S2[Specification]
+        S2 --> S3[Atomic Tasks]
+        S3 --> S4[Verifiable Exit Gate]
     end
 ```
 
@@ -34,14 +34,14 @@ flowchart LR
 Projects begin simply and scale as architectural complexity grows. The framework provides two specification tiers configured via `sdd.config.json`:
 
 ```mermaid
-flowchart TD
-    A["New Project or Feature"] --> B{"Choose Specification Depth"}
-    B -- "Solo Dev / Lightweight MVP" --> C["🟢 Lite Mode (Default)"]
-    C --> C1["Single File: docs/SPEC.md (Specify + Plan + Tasks)"]
-    C1 --> C2["Simple Verifiable Gate: 'Run command, confirm output'"]
-    B -- "Multi-Agent / Enterprise System" --> D["🔴 Rigor Mode (--mode=rigor)"]
-    D --> D1["The Quartet: Plan of Record + Guide + Log + Annex"]
-    D1 --> D2["Negative Control Gates: 'Prove failure before verifying pass'"]
+graph TD
+    A[New Project or Feature] --> B{Choose Specification Depth}
+    B -->|Solo Dev / Lightweight MVP| C[Lite Mode - Default]
+    C --> C1[Single File: docs/SPEC.md]
+    C1 --> C2[Simple Verifiable Gate]
+    B -->|Multi-Agent / Enterprise System| D[Rigor Mode]
+    D --> D1[The Quartet: Plan, Guide, Log, Annex]
+    D1 --> D2[Negative Control Gates]
 ```
 
 ### 1. 🟢 Lite Mode (Default — Solo Developers)
