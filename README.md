@@ -1,8 +1,9 @@
 # Agentic SDD Framework
-*The Universal Open-Source Operating System for Spec-Driven Development with AI Agents*
+
+> The Universal Open-Source Operating System for Spec-Driven Development with AI Agents
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Quality Gate](https://github.com/tBeltty/agentic-sdd-framework/actions/workflows/quality-gate.yml/badge.svg)](https://github.com/tBeltty/agentic-sdd-framework/actions)
+[![Quality Gate](https://github.com/tBeltty/agentic-sdd-framework/actions/workflows/quality-gate.yml/badge.svg?branch=main)](https://github.com/tBeltty/agentic-sdd-framework/actions)
 
 ---
 
