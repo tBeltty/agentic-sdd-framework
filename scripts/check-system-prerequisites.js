@@ -41,10 +41,13 @@ if (gitCheck.success) {
 }
 
 // 3. Check Git Identity (user.name and user.email)
+const isCI = process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true';
 const gitNameCheck = runCommand('git config --get user.name');
 const gitEmailCheck = runCommand('git config --get user.email');
 if (gitNameCheck.success && gitEmailCheck.success && gitNameCheck.output && gitEmailCheck.output) {
     checks.push({ name: 'Git Identity', status: 'PASS', detail: `${gitNameCheck.output} <${gitEmailCheck.output}>` });
+} else if (isCI) {
+    checks.push({ name: 'Git Identity', status: 'PASS', detail: 'CI Runner environment (committer identity not required for builds)' });
 } else {
     checks.push({
         name: 'Git Identity',
