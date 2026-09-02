@@ -1,0 +1,31 @@
+{
+  "name": "agentic-sdd-framework",
+  "version": "1.0.0",
+  "description": "The Universal Open-Source Operating System for Spec-Driven Development with AI Agents",
+  "main": "scripts/sdd-init.js",
+  "scripts": {
+    "init": "node scripts/sdd-init.js",
+    "check:prereqs": "node scripts/check-system-prerequisites.js",
+    "check:secrets": "node scripts/verify-no-secrets.js",
+    "check:slop": "node scripts/check-copy-slop.js",
+    "check:versions": "node scripts/check-versions.js",
+    "install-hooks": "node scripts/install-git-hooks.js",
+    "quality-gate": "node scripts/check-system-prerequisites.js && node scripts/verify-no-secrets.js && node scripts/check-copy-slop.js && node scripts/check-versions.js"
+  },
+  "keywords": [
+    "sdd",
+    "spec-driven-development",
+    "ai-agents",
+    "claude-code",
+    "antigravity",
+    "cursor",
+    "governance",
+    "auditor-executor"
+  ],
+  "author": "tBeltty",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tBeltty/agentic-sdd-framework.git"
+  }
+}

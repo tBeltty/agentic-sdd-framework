@@ -42,7 +42,7 @@ This skill governs how AI agents must act when evaluating architectures, bootstr
 
 ### 5. Zero AI Slop Communication
 * No theatrical persona announcements (avoid headers like `[CTO MODE ACTIVATED]` or decorative emoji spam).
-* No filler phrases, throat-clearing, or false contrasts ("it is not X, it is Y").
+* No filler phrases, throat-clearing, or binary contrast structures (such as defining A merely by negating B).
 * Dense, factual technical statements only.
 
 ---

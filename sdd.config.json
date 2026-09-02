@@ -1,0 +1,30 @@
+{
+  "version": "1.0.0",
+  "project": {
+    "name": "agentic-sdd-framework",
+    "type": "framework",
+    "runtime": "node-20-lts"
+  },
+  "specification": {
+    "mode": "lite",
+    "allowedModes": ["lite", "rigor"]
+  },
+  "architecture": {
+    "style": "clean-architecture",
+    "maxLocPerFile": 400
+  },
+  "capabilities": {
+    "astNavigation": {
+      "adapter": "ast-grep"
+    },
+    "noAiSlop": {
+      "enabled": true
+    },
+    "i18n": {
+      "enabled": false
+    },
+    "pwa": {
+      "enabled": false
+    }
+  }
+}
