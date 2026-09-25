@@ -11,7 +11,7 @@
  *   node scripts/sdd-init.js --express [flags]    Non-interactive mode
  *   npx github:tBeltty/agentic-sdd-framework      Install into the current directory
  *
- * Flags:
+ * Flags (`--flag=value` or `--flag value`; unknown flags are an error):
  *   --target=<dir>        Project to provision (default: current directory)
  *   --name=<name>         Project name (default: target directory name)
  *   --runtime=<runtime>   e.g. node-24-lts, go-1.23, python-3.12
@@ -20,6 +20,7 @@
  *   --concurrency=, --hardware=, --workload=   Discovery answers
  *   --i18n, --pwa         Enable the matching capability flags
  *   --force               Refresh copied skills and templates in install mode
+ *   --help                Print this help
  */
 
 const fs = require('fs');
@@ -28,11 +29,50 @@ const readline = require('readline');
 const { execFileSync, spawnSync } = require('child_process');
 const { FRAMEWORK_ROOT, provision } = require('./lib/provision');
 
-const args = process.argv.slice(2);
+const VALUE_FLAGS = ['target', 'name', 'runtime', 'mode', 'ast', 'concurrency', 'hardware', 'workload'];
+const BOOLEAN_FLAGS = ['express', 'i18n', 'pwa', 'force', 'help'];
+const USAGE = `Usage: sdd-init [--express] [--target=<dir>] [--name=<name>] [--runtime=<id>]
+                [--mode=lite|rigor] [--ast=ast-grep|graphify|ripgrep|lsp]
+                [--concurrency=<text>] [--hardware=<text>] [--workload=<text>]
+                [--i18n] [--pwa] [--force] [--help]`;
+
+function parseArgs(argv) {
+    const values = new Map();
+    const flags = new Set();
+    for (let i = 0; i < argv.length; i++) {
+        const arg = argv[i];
+        const match = arg.match(/^--([a-z0-9-]+)(?:=(.*))?$/);
+        if (!match) throw new Error(`Unexpected argument "${arg}".`);
+        const [, name, inline] = match;
+        if (VALUE_FLAGS.includes(name)) {
+            const value = inline !== undefined ? inline : argv[++i];
+            if (value === undefined || (inline === undefined && value.startsWith('--'))) {
+                throw new Error(`--${name} needs a value.`);
+            }
+            values.set(name, value);
+        } else if (BOOLEAN_FLAGS.includes(name) && inline === undefined) {
+            flags.add(name);
+        } else {
+            throw new Error(`Unknown flag "${arg}".`);
+        }
+    }
+    return { values, flags };
+}
+
+let parsed;
+try {
+    parsed = parseArgs(process.argv.slice(2));
+} catch (error) {
+    console.error(`❌ ${error.message}\n${USAGE}`);
+    process.exit(2);
+}
+if (parsed.flags.has('help')) {
+    console.log(USAGE);
+    process.exit(0);
+}
 
 function getArgValue(name, defaultValue) {
-    const found = args.find(a => a.startsWith(`--${name}=`));
-    return found ? found.slice(name.length + 3) : defaultValue;
+    return parsed.values.has(name) ? parsed.values.get(name) : defaultValue;
 }
 
 const DEFAULTS = {
@@ -43,8 +83,8 @@ const DEFAULTS = {
 };
 
 const target = path.resolve(getArgValue('target', process.cwd()));
-const force = args.includes('--force');
-const wantsExpress = args.includes('--express') || args.some(a => /^--(mode|ast|name|runtime)=/.test(a));
+const force = parsed.flags.has('force');
+const wantsExpress = parsed.flags.has('express') || ['mode', 'ast', 'name', 'runtime'].some(f => parsed.values.has(f));
 
 function printHeader() {
     console.log('\n===============================================================');
@@ -119,8 +159,8 @@ function runExpressMode() {
         concurrency: getArgValue('concurrency', DEFAULTS.concurrency),
         hardware: getArgValue('hardware', DEFAULTS.hardware),
         workload: getArgValue('workload', DEFAULTS.workload),
-        i18n: args.includes('--i18n'),
-        pwa: args.includes('--pwa')
+        i18n: parsed.flags.has('i18n'),
+        pwa: parsed.flags.has('pwa')
     });
 }
 
@@ -139,8 +179,14 @@ function bootstrap(answers) {
 
     console.log('\n🎉 Bootstrapping complete!\n');
     console.log('Next steps:');
-    console.log('  1. Commit the generated files. AGENTS.md, CLAUDE.md and .claude/skills/ load the');
-    console.log('     rules automatically in Claude Code, Codex, Cursor and other AGENTS.md-aware agents.');
+    if (result.skippedEntrypoints.length === 0) {
+        console.log('  1. Commit the generated files. AGENTS.md, CLAUDE.md and .claude/skills/ load the');
+        console.log('     rules automatically in Claude Code, Codex, Cursor and other AGENTS.md-aware agents.');
+    } else {
+        console.log(`  1. Commit the generated files. ${result.skippedEntrypoints.join(' and ')} already existed and`);
+        console.log('     were left untouched, so agents will not load the rules until you add to them:');
+        console.log('     "Before any task, read .agents/AGENTS.md and .agents/CONTEXT.md."');
+    }
     console.log('  2. Record the incident or rationale behind each rule in .agents/AGENTS.md.');
     if (answers.specMode === 'lite') {
         console.log('  3. Define your tasks in docs/SPEC.md and implement with verifiable gates.');

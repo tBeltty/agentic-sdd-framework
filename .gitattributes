@@ -1,0 +1,4 @@
+# Normalize line endings so scripts, hooks, and Markdown behave the same on every platform.
+* text=auto eol=lf
+*.png binary
+*.jpg binary

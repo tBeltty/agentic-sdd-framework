@@ -3,24 +3,34 @@
 /**
  * scripts/sdd-verify.js
  *
- * Runs the verification command declared in the Lite specification's "Verification
- * Gate" and checks it against the expected output. The run passes when the command
- * exits 0 and every non-empty expected line appears in stdout or stderr. An expected
- * line wrapped in slashes (/.../) is matched as a regular expression.
+ * Runs verification commands for the Lite specification and records the results.
  *
- * This executes a command written in docs/SPEC.md, so it only runs when invoked
- * explicitly; the quality gate never calls it.
+ *   node scripts/sdd-verify.js [--record]
+ *       Runs the "Verification Gate" command. Passes when it exits 0, every non-empty
+ *       expected line appears in its output (a /.../ line is a regular expression), and it
+ *       did not modify tracked files. --record writes
+ *       "Last Verified: <date> PASS|FAIL (commit <sha>, exit <code>, state <fingerprint>)"
+ *       into the spec; the gate compares that fingerprint with the committed content.
  *
- * Usage: node scripts/sdd-verify.js [--record]
- *   --record   write the result to the "Last Verified" line of the specification
+ *   node scripts/sdd-verify.js --task <ID> -- <command ...>
+ *       Runs <command>, writes its transcript as the task's Evidence with the exit code and
+ *       a hash of the transcript, and checks the task's box.
+ *
+ * Commands come from the specification or the command line and run in a shell
+ * (specification.verifyShell, default /bin/sh or cmd.exe) with a time limit
+ * (specification.verifyTimeoutSeconds, default 900). The quality gate never runs them.
  */
 
 const fs = require('fs');
 const path = require('path');
-const { spawnSync } = require('child_process');
-const { git, repoRoot } = require('./lib/git');
+const { repoRoot, WORKTREE } = require('./lib/git');
 const { loadConfig, getIn } = require('./lib/config');
-const { parseSpec, withLastVerified } = require('./lib/spec');
+const { parseSpec, withLastVerified, withTaskEvidence } = require('./lib/spec');
+const { stateOf, currentCommit } = require('./lib/state');
+const { DEFAULT_TIMEOUT_SECONDS, runCommand, joinCommand } = require('./lib/runner');
+
+const MAX_EVIDENCE_LINES = 200;
+const USAGE = 'Usage: sdd-verify [--record] | sdd-verify --task <ID> -- <command ...>';
 
 function matchExpected(expected, output) {
     const missing = [];
@@ -34,56 +44,109 @@ function matchExpected(expected, output) {
     return missing;
 }
 
-function currentCommit(root) {
-    try {
-        const sha = git(['rev-parse', '--short', 'HEAD'], root).trim();
-        const dirty = git(['status', '--porcelain', '--untracked-files=no'], root).trim() !== '';
-        return dirty ? `${sha}+uncommitted` : sha;
-    } catch {
-        return 'no-commit';
-    }
-}
-
-function verify({ root = repoRoot(), record = false, log = console.log, date } = {}) {
-    const config = loadConfig(root);
+function loadLiteSpec(root) {
+    const config = loadConfig(root, WORKTREE);
     if (getIn(config, 'specification.mode', 'lite') === 'rigor') {
-        throw new Error('sdd-verify covers Lite mode. In Rigor mode, gates are run per task (see docs/roadmap/execution-guide.md) and checked with auditkit lint.');
+        throw new Error('sdd-verify covers Lite mode. In Rigor mode, gates are run per task (see the execution guide) and checked with auditkit lint.');
     }
     const specFile = getIn(config, 'specification.specFile', 'docs/SPEC.md');
     const specPath = path.join(root, specFile);
     if (!fs.existsSync(specPath)) throw new Error(`${specFile} not found.`);
-    const text = fs.readFileSync(specPath, 'utf8');
+    const runOptions = {
+        cwd: root,
+        timeoutSeconds: getIn(config, 'specification.verifyTimeoutSeconds', DEFAULT_TIMEOUT_SECONDS),
+        shell: getIn(config, 'specification.verifyShell', undefined)
+    };
+    return { specFile, specPath, text: fs.readFileSync(specPath, 'utf8'), runOptions };
+}
+
+function today(date) {
+    return date || new Date().toISOString().slice(0, 10);
+}
+
+function verify({ root = repoRoot(), record = false, log = console.log, date } = {}) {
+    const { specFile, specPath, text, runOptions } = loadLiteSpec(root);
     const { gate } = parseSpec(text);
     if (!gate) throw new Error(`${specFile} has no "Verification Gate" section.`);
     if (!gate.command) throw new Error(`${specFile}: the verification command is still a placeholder.`);
     if (!gate.expected) throw new Error(`${specFile}: the expected output is still a placeholder.`);
 
+    const before = stateOf(root, WORKTREE, specFile);
     log(`$ ${gate.command}\n`);
-    const result = spawnSync(gate.command, { cwd: root, shell: true, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-    const output = `${result.stdout || ''}${result.stderr || ''}`;
+    const { exit, output } = runCommand(gate.command, runOptions);
     log(output.trimEnd());
+    const after = stateOf(root, WORKTREE, specFile);
 
     const missing = matchExpected(gate.expected, output);
-    const exitCode = result.status === null ? `signal ${result.signal}` : result.status;
-    const pass = result.status === 0 && missing.length === 0;
+    const modified = before !== after;
+    const pass = exit === '0' && missing.length === 0 && !modified;
 
     log('');
-    if (result.status !== 0) log(`❌ Command exited with ${exitCode}.`);
+    if (exit !== '0') log(`❌ Command exited with ${exit}.`);
     for (const line of missing) log(`❌ Expected output not found: ${line}`);
+    if (modified) log('❌ The command modified tracked files; verify a clean state, then run it again.');
     if (pass) log('✅ Verification gate passed.');
 
     if (record) {
-        const today = date || new Date().toISOString().slice(0, 10);
-        const value = `${today} ${pass ? 'PASS' : 'FAIL'} (commit ${currentCommit(root)}, exit ${exitCode})`;
+        const value = `${today(date)} ${pass ? 'PASS' : 'FAIL'} (commit ${currentCommit(root)}, exit ${exit}, state ${before})`;
         fs.writeFileSync(specPath, withLastVerified(text, value));
         log(`📝 Recorded in ${specFile}: Last Verified ${value}`);
     }
-    return { pass, exitCode, missing };
+    return { pass, exitCode: exit, missing, modified };
+}
+
+function recordTask({ root = repoRoot(), taskId, command, log = console.log, date } = {}) {
+    const { specFile, specPath, text, runOptions } = loadLiteSpec(root);
+    if (!parseSpec(text).tasks.some(t => t.id === taskId)) {
+        throw new Error(`Task ${taskId} not found in ${specFile}.`);
+    }
+    log(`$ ${command}\n`);
+    const { exit, output } = runCommand(command, runOptions);
+    log(output.trimEnd());
+
+    let lines = output.replace(/\r\n?/g, '\n').replace(/\s+$/, '').split('\n');
+    if (lines.length > MAX_EVIDENCE_LINES) {
+        const omitted = lines.length - MAX_EVIDENCE_LINES;
+        lines = [...lines.slice(0, MAX_EVIDENCE_LINES / 2), `[... ${omitted} lines omitted ...]`, ...lines.slice(-MAX_EVIDENCE_LINES / 2)];
+    }
+    const transcript = [`$ ${command}`, ...lines].join('\n');
+    fs.writeFileSync(specPath, withTaskEvidence(text, taskId, { date: today(date), exit, transcript }));
+    log(`\n${exit === '0' ? '✅' : '❌'} ${taskId}: exit ${exit}, evidence recorded in ${specFile}.`);
+    return { exitCode: exit };
+}
+
+function parseArgs(argv) {
+    const separator = argv.indexOf('--');
+    const flags = separator === -1 ? argv : argv.slice(0, separator);
+    const command = separator === -1 ? [] : argv.slice(separator + 1);
+    const options = { record: false, taskId: null, command: null };
+    for (let i = 0; i < flags.length; i++) {
+        const flag = flags[i];
+        if (flag === '--record') options.record = true;
+        else if (flag === '--task') options.taskId = flags[++i];
+        else if (flag.startsWith('--task=')) options.taskId = flag.slice('--task='.length);
+        else if (flag === '--help' || flag === '-h') throw new Error(USAGE);
+        else throw new Error(`Unknown argument "${flag}". ${USAGE}`);
+    }
+    if (options.taskId !== null) {
+        if (!options.taskId) throw new Error(`--task needs a task ID. ${USAGE}`);
+        if (command.length === 0) throw new Error(`--task needs a command after "--". ${USAGE}`);
+        if (options.record) throw new Error(`--record and --task are separate modes. ${USAGE}`);
+        options.command = joinCommand(command);
+    } else if (command.length > 0) {
+        throw new Error(`A command after "--" is only used with --task. ${USAGE}`);
+    }
+    return options;
 }
 
 if (require.main === module) {
     try {
-        const { pass } = verify({ record: process.argv.includes('--record') });
+        const options = parseArgs(process.argv.slice(2));
+        if (options.taskId) {
+            const { exitCode } = recordTask({ taskId: options.taskId, command: options.command });
+            process.exit(exitCode === '0' ? 0 : 1);
+        }
+        const { pass } = verify({ record: options.record });
         process.exit(pass ? 0 : 1);
     } catch (error) {
         console.error(`❌ ${error.message}`);
@@ -91,4 +154,4 @@ if (require.main === module) {
     }
 }
 
-module.exports = { matchExpected, verify };
+module.exports = { matchExpected, parseArgs, verify, recordTask };

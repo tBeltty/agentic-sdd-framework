@@ -51,3 +51,18 @@ test('honors enabled=false and exclude from sdd.config.json', () => {
     writeFiles(repo, { 'sdd.config.json': JSON.stringify({ capabilities: { noAiSlop: { enabled: false } } }) });
     assert.match(run({ root: repo }).report, /disabled/);
 });
+
+test('F22: the em dash budget counts dashes, not lines', () => {
+    assert.match(flagged('a — b — c')[0], /Em Dash Overuse \(2 found, max 1/);
+});
+
+test('F18: a fence only closes with a matching marker of at least the same length', () => {
+    const text = ['````markdown', '```', 'A robust plan inside a nested example.', '```', '````', 'Plain line.'].join('\n');
+    assert.deepStrictEqual(flagged(text), []);
+    const tildes = ['~~~', '```', 'A robust plan.', '~~~', 'A seamless plan.'].join('\n');
+    assert.deepStrictEqual(flagged(tildes), ['AI Buzzword']);
+});
+
+test('CRLF prose is linted line by line', () => {
+    assert.deepStrictEqual(flagged('fine\r\nA robust plan.\r\n'), ['AI Buzzword']);
+});

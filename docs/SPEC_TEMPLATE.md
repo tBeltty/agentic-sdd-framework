@@ -5,7 +5,7 @@
 **Author:** [Author Name]  
 **Target Completion:** [Date]  
 
-> The quality gate enforces this document: a checked task needs pasted evidence; `In Progress` and `Completed` need a real verification command and expected output; `Completed` needs every task checked and a passing `Last Verified` entry recorded by `sdd-verify --record`.
+> The quality gate enforces this document. Status must be `Draft`, `In Progress`, or `Completed`. A checked task needs evidence: record it with `sdd-verify --task <ID> -- <command>`, or paste the command and its output. `In Progress` and `Completed` need a real verification command and expected output. `Completed` needs every task checked and a PASS recorded by `sdd-verify --record` for the exact content being completed; change a file afterwards and the PASS no longer counts.
 
 ---
 
@@ -53,7 +53,7 @@ List atomic, sequential tasks. Each task must name target files and concrete act
 
 ## 4. Verification Gate
 
-The specification is not complete until this command exits with code 0 and returns expected output. `sdd-verify` runs it and checks that every non-empty line of the expected output appears in the actual output (a line wrapped in `/slashes/` is a regular expression).
+The specification is not complete until this command exits with code 0 and returns expected output. `sdd-verify --record` runs it in `/bin/sh` (macOS, Linux) or `cmd.exe` (Windows) unless `specification.verifyShell` says otherwise, and checks that every non-empty line of the expected output appears in the actual output (a line wrapped in `/slashes/` is a regular expression).
 
 * **Verification Command:**
   ```bash

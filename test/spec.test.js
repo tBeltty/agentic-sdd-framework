@@ -3,72 +3,114 @@ const assert = require('node:assert');
 const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { parseSpec, withLastVerified } = require('../scripts/lib/spec');
-const { lintLiteSpec, run: checkSpec } = require('../scripts/check-spec');
-const { matchExpected, verify } = require('../scripts/sdd-verify');
+const { parseSpec, withLastVerified, withTaskEvidence } = require('../scripts/lib/spec');
+const { lintLiteSpec, parseVersion, versionAtLeast, MIN_AUDITKIT, run: checkSpec } = require('../scripts/check-spec');
+const { matchExpected, parseArgs, verify, recordTask } = require('../scripts/sdd-verify');
 const { tempRepo, git, writeFiles } = require('./helpers');
 
 const TEMPLATE = fs.readFileSync(path.join(__dirname, '../docs/SPEC_TEMPLATE.md'), 'utf8');
+const NODE = JSON.stringify(process.execPath);
 
 // Builds a spec from the real template so the tests track its format.
-function spec({ status, tasks, command = 'npm test', expected = '3 passed', lastVerified }) {
+function spec({ status, checked = [], evidence = {}, command = 'npm test', expected = '3 passed', lastVerified }) {
     let text = TEMPLATE.replace('**Status:** Draft | In Progress | Completed', `**Status:** ${status}`);
     text = text.replace('[command to run tests or validation scripts]', command);
     text = text.replace('[exact pattern or output line confirming success]', expected);
     if (lastVerified) text = text.replace('[recorded by sdd-verify --record]', lastVerified);
-    for (const [id, { checked, evidence }] of Object.entries(tasks || {})) {
-        const n = id.slice(1);
-        if (checked) text = text.replace(`* [ ] **T${n}:**`, `* [x] **T${n}:**`);
-        if (evidence) {
-            const marker = '  * **Evidence:** [command run and its literal output]';
-            const at = text.indexOf(marker, text.indexOf(`**T${n}:**`));
-            text = text.slice(0, at) + `  * **Evidence:** ${evidence}` + text.slice(at + marker.length);
-        }
+    for (const id of checked) text = text.replace(`* [ ] **${id}:**`, `* [x] **${id}:**`);
+    for (const [id, value] of Object.entries(evidence)) {
+        const marker = '  * **Evidence:** [command run and its literal output]';
+        const at = text.indexOf(marker, text.indexOf(`**${id}:**`));
+        text = text.slice(0, at) + `  * **Evidence:** ${value}` + text.slice(at + marker.length);
     }
     return text;
 }
-
-const lint = text => lintLiteSpec(text).problems;
+const ALL = ['T1', 'T2', 'T3'];
+const lint = (text, options) => lintLiteSpec(text, options).problems;
 
 test('the untouched template parses as a draft with placeholders only', () => {
     const parsed = parseSpec(TEMPLATE);
     assert.strictEqual(parsed.status, null);
-    assert.deepStrictEqual(parsed.tasks.map(t => [t.id, t.checked, t.evidence]), [['T1', false, ''], ['T2', false, ''], ['T3', false, '']]);
-    assert.deepStrictEqual(parsed.gate, { command: '', expected: '', lastVerified: '' });
+    assert.strictEqual(parsed.statusProblem, null);
+    assert.deepStrictEqual(parsed.tasks.map(t => [t.id, t.checked, t.evidence.text]), [['T1', false, ''], ['T2', false, ''], ['T3', false, '']]);
+    assert.deepStrictEqual([parsed.gate.command, parsed.gate.expected, parsed.gate.lastVerified], ['', '', '']);
     assert.deepStrictEqual(lint(TEMPLATE), []);
 });
 
 test('a checked task without evidence fails, even in a draft', () => {
-    const problems = lint(spec({ status: 'Draft', tasks: { T1: { checked: true } } }));
-    assert.strictEqual(problems.length, 1);
-    assert.match(problems[0], /T1 is checked but has no evidence/);
+    assert.match(lint(spec({ status: 'Draft', checked: ['T1'] })).join(), /T1 is checked but has no evidence/);
 });
 
-test('evidence can be multi-line with a fenced block', () => {
-    const text = spec({ status: 'Draft', tasks: { T1: { checked: true } } }).replace(
+test('F50: CRLF specs are parsed like LF specs', () => {
+    const crlf = spec({ status: 'Draft', checked: ['T1'] }).replace(/\n/g, '\r\n');
+    assert.strictEqual(parseSpec(crlf).tasks.length, 3);
+    assert.match(lint(crlf).join(), /T1 is checked but has no evidence/);
+});
+
+test('F51: an unknown status is an error, not a silent draft', () => {
+    assert.match(lint(spec({ status: 'Done' })).join(), /Unknown status "Done"/);
+    assert.match(lint(TEMPLATE.replace(/\*\*Status:\*\*.*\n/, '')).join(), /No "\*\*Status:\*\*" line/);
+});
+
+test('F52: checkbox tasks in any list format are checked', () => {
+    const text = TEMPLATE + '\n## 6. More\n\n* [x] Deploy to production\n1. [x] Run the migration\n- [X] **T9:** Rotate keys\n';
+    const problems = lint(text).join('\n');
+    assert.match(problems, /line \d+ is checked but has no evidence/);
+    assert.match(problems, /T9 is checked but has no evidence/);
+    assert.strictEqual((problems.match(/has no evidence/g) || []).length, 3);
+});
+
+test('evidence can be multi-line with a fenced block; fences inside tasks do not end the task', () => {
+    const text = spec({ status: 'Draft', checked: ['T1'] }).replace(
         '  * **Evidence:** [command run and its literal output]',
-        '  * **Evidence:**\n    ```text\n    $ npm test\n    3 passed\n    ```'
+        '  * **Evidence:**\n    ```text\n    $ npm test\n\n    3 passed\n    ```'
     );
-    assert.strictEqual(parseSpec(text).tasks[0].evidence, '$ npm test\n3 passed');
+    assert.strictEqual(parseSpec(text).tasks[0].evidence.text, '$ npm test\n3 passed');
     assert.deepStrictEqual(lint(text), []);
 });
 
 test('in progress requires a real command and expected output', () => {
-    const text = TEMPLATE.replace('**Status:** Draft | In Progress | Completed', '**Status:** In Progress');
-    const problems = lint(text);
+    const problems = lint(TEMPLATE.replace('**Status:** Draft | In Progress | Completed', '**Status:** In Progress'));
     assert.strictEqual(problems.length, 2);
-    assert.match(problems.join('\n'), /command is still a placeholder[\s\S]*expected output is still a placeholder/);
 });
 
-test('completed requires every task checked and a recorded PASS', () => {
-    const problems = lint(spec({ status: 'Completed', tasks: { T1: { checked: true, evidence: '`npm test` -> ok' } } }));
-    assert.match(problems.join('\n'), /T2 is not checked/);
-    assert.match(problems.join('\n'), /T3 is not checked/);
-    assert.match(problems.join('\n'), /no PASS/);
+test('F53: a hand-written Last Verified is rejected even if it says PASS', () => {
+    for (const value of ['PASS', 'FAIL, will PASS later', '2026-09-25 PASS (commit abc1234, exit 0)']) {
+        const text = spec({ status: 'Completed', checked: ALL, evidence: { T1: 'x', T2: 'x', T3: 'x' }, lastVerified: value });
+        assert.match(lint(text).join(), /not written by sdd-verify --record/, value);
+    }
+});
 
-    const all = { checked: true, evidence: '`npm test` -> 3 passed' };
-    const done = spec({ status: 'Completed', tasks: { T1: all, T2: all, T3: all }, lastVerified: '2026-09-25 PASS (commit abc1234, exit 0)' });
-    assert.deepStrictEqual(lint(done), []);
+test('completed requires every task checked, and a PASS matching the expected state', () => {
+    const state = '0123456789abcdef';
+    const done = spec({ status: 'Completed', checked: ALL, evidence: { T1: 'x', T2: 'x', T3: 'x' }, lastVerified: `2026-09-25 PASS (commit abc1234, exit 0, state ${state})` });
+    assert.deepStrictEqual(lint(done, { expectedState: state }), []);
+    assert.match(lint(done, { expectedState: 'fedcba9876543210' }).join(), /does not match the content/);
+    const failed = done.replace('PASS (commit', 'FAIL (commit').replace('exit 0,', 'exit 1,');
+    assert.match(lint(failed, { expectedState: state }).join(), /last verification is FAIL/);
+    assert.match(lint(spec({ status: 'Completed', checked: ['T1'], evidence: { T1: 'x' } })).join(), /T2 is not checked/);
+});
+
+test('F55: recorded evidence is verified; tampering and failures are rejected; manual evidence is counted', () => {
+    const recorded = withTaskEvidence(spec({ status: 'Draft' }), 'T1', { date: '2026-09-25', exit: '0', transcript: '$ npm test\n3 passed' });
+    assert.strictEqual(parseSpec(recorded).tasks[0].checked, true);
+    assert.strictEqual(parseSpec(recorded).tasks[0].evidence.recorded.intact, true);
+    assert.deepStrictEqual(lint(recorded), []);
+
+    assert.match(lint(recorded.replace('3 passed', '4 passed')).join(), /edited after sdd-verify wrote it/);
+    const failing = withTaskEvidence(spec({ status: 'Draft' }), 'T1', { date: '2026-09-25', exit: '1', transcript: '$ npm test\n1 failed' });
+    assert.match(lint(failing).join(), /exit 1, not 0/);
+
+    const manual = spec({ status: 'Draft', checked: ['T1'], evidence: { T1: 'ran npm test: ok' } });
+    assert.deepStrictEqual(lint(manual), []);
+    assert.match(lintLiteSpec(manual).notes.join(), /1 checked task\(s\) have hand-written evidence/);
+    assert.match(lint(manual, { requireRecordedEvidence: true }).join(), /evidence is hand-written/);
+});
+
+test('F58: writers preserve CRLF line endings', () => {
+    const crlf = TEMPLATE.replace(/\n/g, '\r\n');
+    const out = withLastVerified(withTaskEvidence(crlf, 'T2', { date: '2026-09-25', exit: '0', transcript: 'ok' }), 'x');
+    assert.ok(!/[^\r]\n/.test(out), 'every newline must stay CRLF');
 });
 
 test('bracketed shell tests are commands, not placeholders; fenced indentation is kept', () => {
@@ -81,60 +123,107 @@ test('expected output lines match as substrings or /regex/', () => {
     assert.deepStrictEqual(matchExpected('4 passed', 'Tests: 3 passed'), ['4 passed']);
 });
 
-test('withLastVerified replaces the existing entry', () => {
-    const once = withLastVerified(TEMPLATE, '2026-09-25 FAIL (commit a, exit 1)');
-    const twice = withLastVerified(once, '2026-09-26 PASS (commit b, exit 0)');
-    assert.strictEqual((twice.match(/\*\*Last Verified:\*\*/g) || []).length, 1);
-    assert.strictEqual(parseSpec(twice).gate.lastVerified, '2026-09-26 PASS (commit b, exit 0)');
+test('sdd-verify rejects unknown arguments and malformed --task usage', () => {
+    assert.throws(() => parseArgs(['--recrod']), /Unknown argument "--recrod"/);
+    assert.throws(() => parseArgs(['--task', 'T1']), /needs a command/);
+    assert.throws(() => parseArgs(['--', 'echo']), /only used with --task/);
+    assert.deepStrictEqual(parseArgs(['--task=T1', '--', 'npm', 'test']).command, 'npm test');
 });
 
-function liteProject(specText) {
+function liteProject(specText, config = {}) {
     const repo = tempRepo();
     writeFiles(repo, {
-        'sdd.config.json': JSON.stringify({ project: { type: 'application' }, specification: { mode: 'lite' } }),
-        'docs/SPEC.md': specText
+        'sdd.config.json': JSON.stringify({ project: { type: 'application' }, specification: { mode: 'lite', ...config } }),
+        'docs/SPEC.md': specText,
+        'src/app.txt': 'v1\n'
     });
     git(repo, 'add', '-A');
+    git(repo, 'commit', '-q', '-m', 'init');
     return repo;
 }
+const quiet = () => {};
+const completedSpec = (command, expected = 'ok') =>
+    spec({ status: 'Completed', checked: ALL, evidence: { T1: 'x', T2: 'x', T3: 'x' }, command, expected });
 
-test('sdd-verify runs the gate, records PASS, and the completed spec then passes the gate', () => {
-    const all = { checked: true, evidence: '`node -e ...` -> ok' };
-    const repo = liteProject(spec({
-        status: 'Completed',
-        tasks: { T1: all, T2: all, T3: all },
-        command: 'node -e "console.log(\'3 passed in 12ms\')"',
-        expected: '3 passed\n/in \\d+ms/'
-    }));
+test('F54: a PASS recorded and committed with the spec passes the gate', () => {
+    const repo = liteProject(completedSpec(`${NODE} -e "console.log('ok')"`));
     assert.strictEqual(checkSpec({ root: repo }).ok, false);
+    assert.strictEqual(verify({ root: repo, record: true, log: quiet, date: '2026-09-25' }).pass, true);
+    assert.strictEqual(checkSpec({ root: repo }).ok, true, 'uncommitted spec: compared with the working tree');
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-q', '-m', 'complete');
+    assert.strictEqual(checkSpec({ root: repo }).ok, true);
+    assert.strictEqual(checkSpec({ root: repo, source: { kind: 'ref', ref: 'HEAD' } }).ok, true);
+});
 
-    const result = verify({ root: repo, record: true, log: () => {}, date: '2026-09-25' });
-    assert.strictEqual(result.pass, true);
-    assert.match(fs.readFileSync(path.join(repo, 'docs/SPEC.md'), 'utf8'), /Last Verified:\*\* 2026-09-25 PASS \(commit no-commit, exit 0\)/);
+test('F54: files changed after sdd-verify and committed with the spec invalidate the PASS', () => {
+    const repo = liteProject(completedSpec(`${NODE} -e "console.log('ok')"`));
+    verify({ root: repo, record: true, log: quiet, date: '2026-09-25' });
+    writeFiles(repo, { 'src/app.txt': 'v2, never verified\n' });
+    assert.match(checkSpec({ root: repo }).report, /does not match the content/);
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-q', '-m', 'complete with unverified change');
+    assert.match(checkSpec({ root: repo }).report, /does not match the content/);
+    assert.match(checkSpec({ root: repo, source: { kind: 'ref', ref: 'HEAD' } }).report, /does not match the content/);
+});
+
+test('F54: a later commit that does not touch the spec does not reopen it', () => {
+    const repo = liteProject(completedSpec(`${NODE} -e "console.log('ok')"`));
+    verify({ root: repo, record: true, log: quiet, date: '2026-09-25' });
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-q', '-m', 'complete');
+    writeFiles(repo, { 'src/app.txt': 'v2, next feature\n' });
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-q', '-m', 'next feature');
     assert.strictEqual(checkSpec({ root: repo }).ok, true);
 });
 
-test('sdd-verify fails on a non-zero exit or missing expected output, and records FAIL', () => {
-    const exits = liteProject(spec({ status: 'In Progress', command: 'node -e "process.exit(3)"', expected: 'ok' }));
-    assert.strictEqual(verify({ root: exits, log: () => {} }).exitCode, 3);
+test('sdd-verify fails when the command modifies tracked files', () => {
+    const repo = liteProject(completedSpec(`${NODE} -e "require('fs').writeFileSync('src/app.txt','changed');console.log('ok')"`));
+    const result = verify({ root: repo, record: true, log: quiet, date: '2026-09-25' });
+    assert.strictEqual(result.modified, true);
+    assert.strictEqual(result.pass, false);
+    assert.match(fs.readFileSync(path.join(repo, 'docs/SPEC.md'), 'utf8'), /Last Verified:\*\* 2026-09-25 FAIL/);
+});
 
-    const wrong = liteProject(spec({ status: 'In Progress', command: 'echo nope', expected: 'ok' }));
-    const result = verify({ root: wrong, record: true, log: () => {}, date: '2026-09-25' });
-    assert.deepStrictEqual(result.missing, ['ok']);
-    assert.match(fs.readFileSync(path.join(wrong, 'docs/SPEC.md'), 'utf8'), /2026-09-25 FAIL/);
+test('sdd-verify fails on a non-zero exit or missing expected output', () => {
+    assert.strictEqual(verify({ root: liteProject(completedSpec(`${NODE} -e "process.exit(3)"`)), log: quiet }).exitCode, '3');
+    assert.deepStrictEqual(verify({ root: liteProject(completedSpec(`${NODE} -e "console.log('nope')"`)), log: quiet }).missing, ['ok']);
+});
+
+test('F57: sdd-verify enforces specification.verifyTimeoutSeconds', () => {
+    const repo = liteProject(completedSpec(`${NODE} -e "setTimeout(() => {}, 6000)"`), { verifyTimeoutSeconds: 1 });
+    assert.strictEqual(verify({ root: repo, log: quiet }).exitCode, 'timeout');
+});
+
+test('sdd-verify --task records real output as evidence and checks the box', () => {
+    const repo = liteProject(spec({ status: 'In Progress' }));
+    assert.strictEqual(recordTask({ root: repo, taskId: 'T2', command: `${NODE} -e "console.log('2 passed')"`, log: quiet, date: '2026-09-25' }).exitCode, '0');
+    const task = parseSpec(fs.readFileSync(path.join(repo, 'docs/SPEC.md'), 'utf8')).tasks.find(t => t.id === 'T2');
+    assert.strictEqual(task.checked, true);
+    assert.strictEqual(task.evidence.recorded.intact, true);
+    assert.match(task.evidence.text, /2 passed/);
+    assert.throws(() => recordTask({ root: repo, taskId: 'T9', command: 'echo', log: quiet }), /Task T9 not found/);
 });
 
 test('sdd-verify refuses placeholder commands', () => {
-    const repo = liteProject(TEMPLATE);
-    assert.throws(() => verify({ root: repo, log: () => {} }), /verification command is still a placeholder/);
+    assert.throws(() => verify({ root: liteProject(TEMPLATE), log: quiet }), /verification command is still a placeholder/);
 });
 
 test('a missing lite spec fails the gate; the framework repository is exempt', () => {
     const repo = tempRepo();
     writeFiles(repo, { 'sdd.config.json': JSON.stringify({ specification: { mode: 'lite' } }) });
+    git(repo, 'add', '-A');
     assert.match(checkSpec({ root: repo }).report, /docs\/SPEC\.md not found/);
     writeFiles(repo, { 'sdd.config.json': JSON.stringify({ project: { type: 'framework' } }) });
     assert.strictEqual(checkSpec({ root: repo }).ok, true);
+});
+
+test('F75: auditkit version comparison', () => {
+    assert.deepStrictEqual(parseVersion('auditkit 0.3.0\n'), [0, 3, 0]);
+    assert.strictEqual(versionAtLeast([0, 2, 9], MIN_AUDITKIT), false);
+    assert.strictEqual(versionAtLeast([0, 3, 0], MIN_AUDITKIT), true);
+    assert.strictEqual(versionAtLeast([1, 0, 0], MIN_AUDITKIT), true);
 });
 
 // Rigor mode delegates to auditkit. SDD_AUDITKIT points at a specific binary in tests;
@@ -151,27 +240,48 @@ function rigorProject(log) {
         'docs/roadmap/execution-guide.md': fs.readFileSync(path.join(templates, 'execution-guide.md'), 'utf8'),
         'docs/roadmap/compliance-log.md': log || fs.readFileSync(path.join(templates, 'compliance-log.md'), 'utf8')
     });
+    git(repo, 'add', '-A');
     return repo;
 }
 
-test('rigor mode reports a missing auditkit with install instructions', () => {
+function withAuditkit(bin, fn) {
     const previous = process.env.SDD_AUDITKIT;
-    process.env.SDD_AUDITKIT = '/nonexistent/auditkit';
+    process.env.SDD_AUDITKIT = bin;
     try {
-        const result = checkSpec({ root: rigorProject() });
-        assert.strictEqual(result.ok, false);
-        assert.match(result.report, /pipx install git\+https:\/\/github\.com\/tBeltty\/auditor-executor-protocol/);
+        return fn();
     } finally {
         if (previous === undefined) delete process.env.SDD_AUDITKIT; else process.env.SDD_AUDITKIT = previous;
     }
+}
+
+test('rigor mode reports a missing auditkit with install instructions', () => {
+    const result = withAuditkit('/nonexistent/auditkit', () => checkSpec({ root: rigorProject() }));
+    assert.strictEqual(result.ok, false);
+    assert.match(result.report, /pipx install git\+https:\/\/github\.com\/tBeltty\/auditor-executor-protocol/);
+});
+
+test('F75: rigor mode rejects an auditkit older than the minimum', { skip: process.platform === 'win32' && 'uses a shell-script stub' }, () => {
+    const stub = path.join(tempRepo(), 'auditkit');
+    fs.writeFileSync(stub, '#!/bin/sh\necho "auditkit 0.2.0"\n', { mode: 0o755 });
+    const result = withAuditkit(stub, () => checkSpec({ root: rigorProject() }));
+    assert.strictEqual(result.ok, false);
+    assert.match(result.report, /older than 0\.3\.0/);
 });
 
 test('rigor mode passes fresh templates and rejects DONE without evidence', { skip: !hasAuditkit && 'auditkit not installed' }, () => {
     assert.strictEqual(checkSpec({ root: rigorProject() }).ok, true);
-
     const templates = path.join(__dirname, '../docs/roadmap/templates');
     const log = fs.readFileSync(path.join(templates, 'compliance-log.md'), 'utf8').replace('### P0-T1 — PENDING', '### P0-T1 — DONE');
     const result = checkSpec({ root: rigorProject(log) });
     assert.strictEqual(result.ok, false);
     assert.match(result.report, /done without evidence/);
+});
+
+test('F61: rigor mode lints the staged documents, not the working tree', { skip: !hasAuditkit && 'auditkit not installed' }, () => {
+    const templates = path.join(__dirname, '../docs/roadmap/templates');
+    const badLog = fs.readFileSync(path.join(templates, 'compliance-log.md'), 'utf8').replace('### P0-T1 — PENDING', '### P0-T1 — DONE');
+    const repo = rigorProject(badLog);
+    writeFiles(repo, { 'docs/roadmap/compliance-log.md': fs.readFileSync(path.join(templates, 'compliance-log.md'), 'utf8') });
+    assert.strictEqual(checkSpec({ root: repo }).ok, true, 'working tree is clean');
+    assert.strictEqual(checkSpec({ root: repo, source: { kind: 'index' } }).ok, false, 'index has DONE without evidence');
 });

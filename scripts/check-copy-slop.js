@@ -10,11 +10,13 @@
  * Config (sdd.config.json -> capabilities.noAiSlop):
  *   enabled      false skips the check (default true)
  *   exclude      path prefixes to skip
- *   maxEmDashes  em dashes allowed per file (default 1)
+ *   maxEmDashes  em dashes allowed per file, counted individually (default 1)
  */
 
-const { repoRoot, listFiles, readFile, isBinary } = require('./lib/git');
+const { listFiles, readFiles, isBinary, WORKTREE } = require('./lib/git');
 const { loadConfig, getIn } = require('./lib/config');
+const { runCheckCli } = require('./lib/cli');
+const { normalizeEol, createFenceTracker } = require('./lib/markdown');
 const { BANNED_PATTERNS } = require('./lib/slop-patterns');
 
 const PROSE_EXTENSIONS = ['.md', '.mdx', '.txt'];
@@ -31,18 +33,20 @@ const DEFAULT_EXCLUDE = [
 function lintContent(content, { maxEmDashes = 1 } = {}) {
     const violations = [];
     const emDashLines = [];
-    let inFence = false;
+    let emDashes = 0;
+    const fence = createFenceTracker();
 
-    content.split('\n').forEach((rawLine, index) => {
+    normalizeEol(content).split('\n').forEach((rawLine, index) => {
         const trimmed = rawLine.trim();
-        if (/^(```|~~~)/.test(trimmed)) {
-            inFence = !inFence;
-            return;
-        }
-        if (inFence || trimmed.startsWith('|') || /^-{3,}$/.test(trimmed)) return;
+        if (fence.update(rawLine) || fence.inside) return;
+        if (trimmed.startsWith('|') || /^-{3,}$/.test(trimmed)) return;
 
         const line = rawLine.replace(/`[^`]*`/g, '``');
-        if (line.includes('—')) emDashLines.push(index + 1);
+        const dashes = (line.match(/—/g) || []).length;
+        if (dashes > 0) {
+            emDashes += dashes;
+            emDashLines.push(index + 1);
+        }
 
         for (const pattern of BANNED_PATTERNS) {
             const match = line.match(pattern.regex);
@@ -58,10 +62,10 @@ function lintContent(content, { maxEmDashes = 1 } = {}) {
         }
     });
 
-    if (emDashLines.length > maxEmDashes) {
+    if (emDashes > maxEmDashes) {
         violations.push({
             line: emDashLines[0],
-            pattern: `Em Dash Overuse (${emDashLines.length} found, max ${maxEmDashes} per file)`,
+            pattern: `Em Dash Overuse (${emDashes} found, max ${maxEmDashes} per file)`,
             matchedText: '—',
             lineText: `lines ${emDashLines.join(', ')}`
         });
@@ -69,21 +73,20 @@ function lintContent(content, { maxEmDashes = 1 } = {}) {
     return violations;
 }
 
-function run({ root = repoRoot(), staged = false } = {}) {
-    const config = loadConfig(root);
+function run({ root, source = WORKTREE } = {}) {
+    const config = loadConfig(root, source);
     if (getIn(config, 'capabilities.noAiSlop.enabled', true) === false) {
         return { ok: true, report: '⏭️  No-AI-Slop linter disabled in sdd.config.json.' };
     }
     const exclude = [...DEFAULT_EXCLUDE, ...getIn(config, 'capabilities.noAiSlop.exclude', [])];
     const maxEmDashes = getIn(config, 'capabilities.noAiSlop.maxEmDashes', 1);
 
-    const files = listFiles(root, { staged })
+    const files = listFiles(root, source)
         .filter(f => PROSE_EXTENSIONS.some(ext => f.endsWith(ext)))
         .filter(f => !exclude.some(prefix => f.startsWith(prefix)));
 
     const violations = [];
-    for (const file of files) {
-        const buffer = readFile(root, file, { staged });
+    for (const [file, buffer] of readFiles(root, files, source)) {
         if (!buffer || isBinary(buffer)) continue;
         for (const v of lintContent(buffer.toString('utf8'), { maxEmDashes })) {
             violations.push({ file, ...v });
@@ -105,12 +108,7 @@ function run({ root = repoRoot(), staged = false } = {}) {
 }
 
 if (require.main === module) {
-    console.log('\n======================================================');
-    console.log('  ✍️  Agentic SDD Framework: No-AI-Slop Copy Linter');
-    console.log('======================================================\n');
-    const result = run({ staged: process.argv.includes('--staged') });
-    (result.ok ? console.log : console.error)(result.report + '\n');
-    process.exit(result.ok ? 0 : 1);
+    runCheckCli('✍️  Agentic SDD Framework: No-AI-Slop Copy Linter', run);
 }
 
 module.exports = { lintContent, run };

@@ -1,8 +1,7 @@
 {
   "name": "agentic-sdd-framework",
-  "version": "1.2.0",
-  "description": "The Universal Open-Source Operating System for Spec-Driven Development with AI Agents",
-  "main": "scripts/sdd-init.js",
+  "version": "1.3.0",
+  "description": "Spec-Driven Development governance for AI coding agents: auto-loaded agent rules, specifications with recorded evidence, and a pre-push quality gate",
   "bin": {
     "sdd-init": "scripts/sdd-init.js"
   },
@@ -12,7 +11,8 @@
     "docs/",
     "sdd.config.json",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "engines": {
     "node": ">=22"

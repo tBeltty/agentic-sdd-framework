@@ -14,9 +14,13 @@
 const fs = require('fs');
 const path = require('path');
 const { install: installHook } = require('../install-git-hooks');
+const { validateConfig, getIn } = require('./config');
 
 const FRAMEWORK_ROOT = path.resolve(__dirname, '..', '..');
 const MANAGED_MARKER = 'sdd:managed';
+// Marks a .claude/skills/<name> directory as a copy made by sdd-init (where symlinks are
+// unavailable), so --force refreshes it and never touches a directory the user created.
+const COPY_MARKER = '.sdd-managed-copy';
 const SPEC_MODES = ['lite', 'rigor'];
 const AST_ADAPTERS = ['ast-grep', 'graphify', 'ripgrep', 'lsp'];
 const TOOL_DIR = '.sdd/scripts';
@@ -45,7 +49,12 @@ const ICONS = { created: '✅', updated: '🔄', linked: '🔗', copied: '📄',
 const replaceLiteral = (text, from, to) => text.split(from).join(to);
 
 function readJson(file) {
-    return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : null;
+    if (!fs.existsSync(file)) return null;
+    try {
+        return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+    } catch (error) {
+        throw new Error(`${path.basename(file)} is not valid JSON: ${error.message}`);
+    }
 }
 
 function isPlainObject(value) {
@@ -85,7 +94,8 @@ function buildConfig(answers, existing) {
         capabilities: { noAiSlop: { enabled: true } }
     };
     const generated = {
-        version: readJson(path.join(FRAMEWORK_ROOT, 'package.json')).version,
+        $schema: `https://raw.githubusercontent.com/tBeltty/agentic-sdd-framework/v${frameworkVersion()}/scripts/lib/sdd.config.schema.json`,
+        version: frameworkVersion(),
         project: { name: answers.projectName, type: 'application', runtime: answers.runtime },
         specification: { mode: answers.specMode, allowedModes: SPEC_MODES },
         discovery: { concurrency: answers.concurrency, hardware: answers.hardware, workload: answers.workload },
@@ -96,11 +106,20 @@ function buildConfig(answers, existing) {
         }
     };
     const merged = deepMerge(deepMerge(defaults, existing || {}), generated);
-    const order = ['version', 'project', 'specification', 'discovery', 'architecture', 'capabilities'];
-    return Object.fromEntries([
+    const order = ['$schema', 'version', 'project', 'specification', 'discovery', 'architecture', 'capabilities'];
+    const config = Object.fromEntries([
         ...order.filter(k => k in merged).map(k => [k, merged[k]]),
         ...Object.entries(merged).filter(([k]) => !order.includes(k))
     ]);
+    const errors = validateConfig(config);
+    if (errors.length > 0) {
+        throw new Error(`sdd.config.json is invalid; fix it and rerun:\n${errors.map(e => `  - ${e}`).join('\n')}`);
+    }
+    return config;
+}
+
+function frameworkVersion() {
+    return readJson(path.join(FRAMEWORK_ROOT, 'package.json')).version;
 }
 
 function fillContext(text, answers, config) {
@@ -137,14 +156,16 @@ function fillAdr(text, answers, date) {
     return out.replace(/(4\. \*\*Modularity and Localization:\*\*[^\n]*\n)/, match => match + recorded);
 }
 
-function renderEntrypoint(answers, gateCommand) {
+function renderEntrypoint(answers, gateCommand, config) {
+    const specFile = getIn(config, 'specification.specFile', 'docs/SPEC.md');
+    const roadmapDir = getIn(config, 'specification.roadmapDir', 'docs/roadmap');
     const specLocation = answers.specMode === 'lite'
-        ? '`docs/SPEC.md`: the active specification (Lite mode).'
-        : '`docs/roadmap/`: `plan-of-record.md`, `execution-guide.md`, `compliance-log.md`, and `annexes/` (Rigor mode).';
+        ? `\`${specFile}\`: the active specification (Lite mode).`
+        : `\`${roadmapDir}/\`: \`plan-of-record.md\`, \`execution-guide.md\`, \`compliance-log.md\`, and \`annexes/\` (Rigor mode).`;
     const toolDir = gateCommand.replace(/^node /, '').replace(/\/quality-gate\.js$/, '');
     const specCheck = answers.specMode === 'lite'
-        ? `Close \`docs/SPEC.md\` by running \`node ${toolDir}/sdd-verify.js --record\`; the gate rejects a \`Completed\` spec without a recorded PASS.`
-        : 'The gate runs `auditkit lint docs/roadmap`; a `DONE` report without pasted verify output fails it.';
+        ? `Record task evidence with \`node ${toolDir}/sdd-verify.js --task <ID> -- <command>\` and close \`${specFile}\` with \`node ${toolDir}/sdd-verify.js --record\`; the gate rejects a \`Completed\` spec whose recorded PASS does not match the committed content.`
+        : `The gate runs \`auditkit lint ${roadmapDir}\`; a \`DONE\` report without pasted verify output fails it.`;
     const values = {
         SPEC_CHECK: specCheck,
         PROJECT_NAME: answers.projectName,
@@ -171,6 +192,7 @@ function provision(rawAnswers, { target = process.cwd(), force = false, log = co
     const today = date || new Date().toISOString().slice(0, 10);
     const at = rel => path.join(root, rel);
     const record = (status, what) => log(`  ${ICONS[status]} ${what} (${status})`);
+    const skippedEntrypoints = [];
 
     const write = (rel, content) => {
         fs.mkdirSync(path.dirname(at(rel)), { recursive: true });
@@ -184,7 +206,10 @@ function provision(rawAnswers, { target = process.cwd(), force = false, log = co
     const writeManaged = (rel, content) => {
         if (fs.existsSync(at(rel))) {
             const current = fs.readFileSync(at(rel), 'utf8');
-            if (!current.includes(MANAGED_MARKER)) return record('skipped', `${rel} exists and is not managed by sdd-init`);
+            if (!current.includes(MANAGED_MARKER)) {
+                skippedEntrypoints.push(rel);
+                return record('skipped', `${rel} exists and is not managed by sdd-init`);
+            }
             if (current === content) return record('unchanged', rel);
             write(rel, content);
             return record('updated', rel);
@@ -196,10 +221,14 @@ function provision(rawAnswers, { target = process.cwd(), force = false, log = co
     // 1. Framework assets (install mode only). Tooling is framework-owned and always
     //    refreshed; skills and templates are refreshed only with --force.
     if (installMode) {
+        const versionFile = at('.sdd/VERSION');
+        const previous = fs.existsSync(versionFile) ? fs.readFileSync(versionFile, 'utf8').trim() : null;
         for (const file of TOOL_FILES) {
             fs.cpSync(path.join(FRAMEWORK_ROOT, 'scripts', file), at(path.join(TOOL_DIR, file)), { recursive: true });
         }
-        record('updated', `${TOOL_DIR}/ (quality gate tooling)`);
+        write('.sdd/VERSION', `${frameworkVersion()}\n`);
+        const change = previous && previous !== frameworkVersion() ? ` from ${previous} to ${frameworkVersion()}` : ` at ${frameworkVersion()}`;
+        record('updated', `${TOOL_DIR}/ (quality gate tooling${change})`);
         const skillsRoot = path.join(FRAMEWORK_ROOT, '.agents/skills');
         for (const skill of fs.readdirSync(skillsRoot, { withFileTypes: true }).filter(d => d.isDirectory())) {
             const rel = `.agents/skills/${skill.name}`;
@@ -241,18 +270,29 @@ function provision(rawAnswers, { target = process.cwd(), force = false, log = co
     //    .claude/skills/ (Claude Code) so the rules load without a manual prompt.
     const gateScript = installMode ? at(`${TOOL_DIR}/quality-gate.js`) : path.join(FRAMEWORK_ROOT, 'scripts/quality-gate.js');
     const gateCommand = `node ${path.relative(root, gateScript).split(path.sep).join('/')}`;
-    writeManaged('AGENTS.md', renderEntrypoint(answers, gateCommand));
+    writeManaged('AGENTS.md', renderEntrypoint(answers, gateCommand, config));
     writeManaged('CLAUDE.md', CLAUDE_ENTRYPOINT);
     for (const skill of fs.readdirSync(at('.agents/skills'), { withFileTypes: true }).filter(d => d.isDirectory())) {
         const rel = `.claude/skills/${skill.name}`;
-        if (fs.existsSync(at(rel)) || isSymlink(at(rel))) { record('kept', rel); continue; }
+        if (isSymlink(at(rel))) { record('kept', rel); continue; }
+        const copySkill = () => {
+            fs.cpSync(at(`.agents/skills/${skill.name}`), at(rel), { recursive: true });
+            fs.writeFileSync(at(`${rel}/${COPY_MARKER}`), 'Copied by sdd-init; rerun with --force to refresh.\n');
+            record('copied', rel);
+        };
+        if (fs.existsSync(at(rel))) {
+            // A copy made by sdd-init goes stale; --force refreshes it. Anything else is the user's.
+            if (!force || !fs.existsSync(at(`${rel}/${COPY_MARKER}`))) { record('kept', rel); continue; }
+            fs.rmSync(at(rel), { recursive: true, force: true });
+            copySkill();
+            continue;
+        }
         fs.mkdirSync(path.dirname(at(rel)), { recursive: true });
         try {
             fs.symlinkSync(path.join('..', '..', '.agents', 'skills', skill.name), at(rel), 'dir');
             record('linked', rel);
         } catch {
-            fs.cpSync(at(`.agents/skills/${skill.name}`), at(rel), { recursive: true });
-            record('copied', rel);
+            copySkill();
         }
     }
 
@@ -266,7 +306,7 @@ function provision(rawAnswers, { target = process.cwd(), force = false, log = co
         record('skipped', `pre-push hook: ${error.message}`);
     }
 
-    return { installMode, root, gateCommand, hookInstalled, config };
+    return { installMode, root, gateCommand, hookInstalled, config, skippedEntrypoints };
 }
 
 function isSymlink(file) {

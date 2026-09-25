@@ -36,7 +36,9 @@ test('install mode provisions an existing project from another working directory
     assert.match(read(project, 'CLAUDE.md'), /^@\.agents\/AGENTS\.md$/m);
     assert.match(read(project, '.agents/CONTEXT.md'), /\*\*Primary Runtime:\*\* go-1\.23/);
     assert.match(read(project, 'docs/decisions/ADR-0001-stack-and-architecture.md'), /Hardware and Deployment:\*\* \$5 VPS/);
-    assert.ok(fs.lstatSync(path.join(project, '.claude/skills/strategic-cto')).isSymbolicLink());
+    // Windows without developer mode cannot create symlinks; the wizard copies instead.
+    const skillEntry = fs.lstatSync(path.join(project, '.claude/skills/strategic-cto'));
+    assert.ok(skillEntry.isSymbolicLink() || (process.platform === 'win32' && skillEntry.isDirectory()));
 
     const config = JSON.parse(read(project, 'sdd.config.json'));
     assert.strictEqual(config.project.name, 'shop');
@@ -52,7 +54,7 @@ test('rerunning is idempotent and preserves user edits and custom config keys', 
     init(project, '--name=app');
     fs.appendFileSync(path.join(project, '.agents/AGENTS.md'), '\n## 9. Custom rule\n');
     const config = JSON.parse(read(project, 'sdd.config.json'));
-    config.custom = { keep: true };
+    config['x-team'] = { keep: true };
     config.architecture.maxLocPerFile = 250;
     fs.writeFileSync(path.join(project, 'sdd.config.json'), JSON.stringify(config));
 
@@ -60,7 +62,7 @@ test('rerunning is idempotent and preserves user edits and custom config keys', 
 
     assert.match(read(project, '.agents/AGENTS.md'), /Custom rule/);
     const merged = JSON.parse(read(project, 'sdd.config.json'));
-    assert.deepStrictEqual(merged.custom, { keep: true });
+    assert.deepStrictEqual(merged['x-team'], { keep: true });
     assert.strictEqual(merged.architecture.maxLocPerFile, 250);
     assert.strictEqual(merged.specification.mode, 'rigor');
     for (const doc of ['plan-of-record', 'execution-guide', 'compliance-log']) {
@@ -86,7 +88,7 @@ test('invalid flags fail loudly instead of silently defaulting', () => {
     assert.throws(() => init(project, '--ast=grep'), /Unknown AST adapter "grep"/);
 });
 
-test('pre-push hook works in linked worktrees and chains an existing hook', () => {
+test('pre-push hook works in linked worktrees and chains an existing hook', { skip: process.platform === 'win32' && 'runs the sh hook directly' }, () => {
     const project = tempRepo();
     writeFiles(project, { 'README.md': '# app\n' });
     git(project, 'add', '-A');
@@ -102,8 +104,13 @@ test('pre-push hook works in linked worktrees and chains an existing hook', () =
     assert.match(fs.readFileSync(`${hookPath}.local`, 'utf8'), /previous-hook-ran/);
 
     git(worktree, 'add', '-A');
-    const output = execFileSync(hookPath, [], { cwd: worktree, input: '', encoding: 'utf8' });
+    git(worktree, 'commit', '-q', '-m', 'provision');
+    const sha = git(worktree, 'rev-parse', 'HEAD').trim();
+    const input = `refs/heads/wt ${sha} refs/heads/wt ${'0'.repeat(40)}\n`;
+    const output = execFileSync(hookPath, ['origin'], { cwd: worktree, input, encoding: 'utf8' });
     assert.match(output, /previous-hook-ran/);
+    assert.match(output, /Specification Check ---\n✅ docs\/SPEC\.md/);
+    assert.match(output, /No secrets added by the \d+ commit\(s\) being pushed/);
     assert.match(output, /Quality gate passed/);
 });
 
@@ -127,4 +134,57 @@ test('clone mode uses templates in place and does not copy tooling', () => {
     assert.ok(!exists(clone, '.sdd'));
     assert.match(read(clone, 'AGENTS.md'), /node scripts\/quality-gate\.js/);
     assert.strictEqual(JSON.parse(read(clone, 'sdd.config.json')).project.type, 'application');
+});
+
+test('F7: an invalid existing config stops sdd-init with the exact problems', () => {
+    const project = tempRepo();
+    writeFiles(project, { 'sdd.config.json': JSON.stringify({ architecture: { maxLocPerFle: 10 } }) });
+    assert.throws(() => init(project), /architecture\.maxLocPerFle: unknown key/);
+});
+
+test('F59: sdd-init rejects unknown flags and accepts "--flag value"', () => {
+    const project = tempRepo();
+    assert.throws(() => init(project, '--mdoe=rigor'), /Unknown flag "--mdoe=rigor"/);
+    const target = tempRepo();
+    execFileSync(process.execPath, [INIT, '--express', '--target', target, '--mode', 'rigor'], { cwd: tempDir(), stdio: 'pipe' });
+    assert.ok(exists(target, 'docs/roadmap/execution-guide.md'));
+    assert.ok(!exists(project, 'AGENTS.md'));
+});
+
+test('F72: install mode records the tooling version; F77: entry point follows roadmapDir', () => {
+    const project = tempRepo();
+    writeFiles(project, { 'sdd.config.json': JSON.stringify({ specification: { roadmapDir: 'plans' } }) });
+    init(project, '--mode=rigor');
+    const version = JSON.parse(fs.readFileSync(path.join(FRAMEWORK_ROOT, 'package.json'), 'utf8')).version;
+    assert.strictEqual(read(project, '.sdd/VERSION').trim(), version);
+    assert.match(read(project, 'AGENTS.md'), /auditkit lint plans/);
+    assert.match(read(project, 'sdd.config.json'), new RegExp(`agentic-sdd-framework/v${version.replace(/\./g, '\\.')}/scripts/lib/sdd\\.config\\.schema\\.json`));
+});
+
+test('F76: a skipped AGENTS.md is reported in the next steps', () => {
+    const project = tempRepo();
+    writeFiles(project, { 'AGENTS.md': '# Mine\n' });
+    assert.match(init(project), /already existed and[\s\S]*will not load the rules/);
+});
+
+test('F60: --force refreshes copied .claude/skills directories', () => {
+    const project = tempRepo();
+    init(project);
+    const link = path.join(project, '.claude/skills/no-ai-slop');
+    fs.rmSync(link, { recursive: true, force: true });
+    fs.mkdirSync(link, { recursive: true });
+    fs.writeFileSync(path.join(link, 'SKILL.md'), 'stale copy');
+    fs.writeFileSync(path.join(link, '.sdd-managed-copy'), '');
+    init(project);
+    assert.strictEqual(fs.readFileSync(path.join(link, 'SKILL.md'), 'utf8'), 'stale copy');
+    init(project, '--force');
+    assert.match(fs.readFileSync(path.join(link, 'SKILL.md'), 'utf8'), /No AI Slop/);
+
+    // A directory the user created (no marker) is never replaced, even with --force.
+    const own = path.join(project, '.claude/skills/strategic-cto');
+    fs.rmSync(own, { recursive: true, force: true });
+    fs.mkdirSync(own, { recursive: true });
+    fs.writeFileSync(path.join(own, 'SKILL.md'), 'my own skill');
+    init(project, '--force');
+    assert.strictEqual(fs.readFileSync(path.join(own, 'SKILL.md'), 'utf8'), 'my own skill');
 });

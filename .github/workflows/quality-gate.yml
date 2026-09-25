@@ -8,12 +8,18 @@ on:
 
 jobs:
   verify:
-    name: Verify Quality Gate
-    runs-on: ubuntu-latest
+    name: Node ${{ matrix.node-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         node-version: [22, 24]
+        include:
+          - os: macos-latest
+            node-version: 24
+          - os: windows-latest
+            node-version: 24
 
     steps:
       - name: Checkout Repository

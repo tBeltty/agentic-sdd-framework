@@ -12,8 +12,9 @@
  */
 
 const path = require('path');
-const { repoRoot, listFiles, readFile, isBinary } = require('./lib/git');
+const { listFiles, readFiles, isBinary, WORKTREE } = require('./lib/git');
 const { loadConfig, getIn } = require('./lib/config');
+const { runCheckCli } = require('./lib/cli');
 
 const SOURCE_EXTENSIONS = new Set([
     '.js', '.mjs', '.cjs', '.jsx', '.ts', '.mts', '.cts', '.tsx', '.vue', '.svelte',
@@ -24,24 +25,24 @@ const SOURCE_EXTENSIONS = new Set([
 
 function countLines(text) {
     if (text.length === 0) return 0;
-    return text.split('\n').length - (text.endsWith('\n') ? 1 : 0);
+    const normalized = text.replace(/\r\n?/g, '\n');
+    return normalized.split('\n').length - (normalized.endsWith('\n') ? 1 : 0);
 }
 
-function run({ root = repoRoot(), staged = false } = {}) {
-    const config = loadConfig(root);
+function run({ root, source = WORKTREE } = {}) {
+    const config = loadConfig(root, source);
     const limit = getIn(config, 'architecture.maxLocPerFile', 400);
     if (!limit) {
         return { ok: true, report: '⏭️  File size limit disabled (architecture.maxLocPerFile is 0).' };
     }
     const exclude = getIn(config, 'architecture.maxLocExclude', []);
 
-    const files = listFiles(root, { staged })
+    const files = listFiles(root, source)
         .filter(f => SOURCE_EXTENSIONS.has(path.extname(f).toLowerCase()))
         .filter(f => !exclude.some(prefix => f.startsWith(prefix)));
 
     const oversized = [];
-    for (const file of files) {
-        const buffer = readFile(root, file, { staged });
+    for (const [file, buffer] of readFiles(root, files, source)) {
         if (!buffer || isBinary(buffer)) continue;
         const lines = countLines(buffer.toString('utf8'));
         if (lines > limit) oversized.push({ file, lines });
@@ -59,12 +60,7 @@ function run({ root = repoRoot(), staged = false } = {}) {
 }
 
 if (require.main === module) {
-    console.log('\n======================================================');
-    console.log('  📏 Agentic SDD Framework: File Size Limit');
-    console.log('======================================================\n');
-    const result = run({ staged: process.argv.includes('--staged') });
-    (result.ok ? console.log : console.error)(result.report + '\n');
-    process.exit(result.ok ? 0 : 1);
+    runCheckCli('📏 Agentic SDD Framework: File Size Limit', run);
 }
 
 module.exports = { countLines, run };
