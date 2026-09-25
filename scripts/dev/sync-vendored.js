@@ -44,13 +44,22 @@ function orphans(canonical) {
 }
 
 function main() {
-    const [canonicalArg, flag] = process.argv.slice(2);
-    if (!canonicalArg) {
-        console.error('Usage: node scripts/dev/sync-vendored.js <canonical-checkout> [--check]');
+    const usage = 'Usage: node scripts/dev/sync-vendored.js <canonical-checkout> [--check]';
+    const args = process.argv.slice(2);
+    const flags = args.filter(a => a.startsWith('-'));
+    const positional = args.filter(a => !a.startsWith('-'));
+    // A mistyped flag must not turn a check into a write.
+    const unknown = flags.filter(f => f !== '--check');
+    if (unknown.length > 0 || positional.length !== 1) {
+        console.error(unknown.length > 0 ? `Unknown argument "${unknown[0]}". ${usage}` : usage);
         process.exit(2);
     }
-    const canonical = path.resolve(canonicalArg);
-    const check = flag === '--check';
+    const canonical = path.resolve(positional[0]);
+    if (!fs.existsSync(path.join(canonical, 'SKILL.md'))) {
+        console.error(`${canonical} is not a checkout of the protocol repository (no SKILL.md). ${usage}`);
+        process.exit(2);
+    }
+    const check = flags.includes('--check');
     const drift = [];
 
     for (const [src, rel] of mappings(canonical)) {

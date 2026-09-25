@@ -253,3 +253,13 @@ test('quality gate CLI: --staged and --ref select the source', () => {
     assert.strictEqual(ref.status, 1);
     assert.match(ref.stderr, /Quality gate failed: Secret Leak Scanner\./);
 });
+
+test('R20: sync-vendored rejects a mistyped flag instead of writing', () => {
+    const script = path.join(__dirname, '../scripts/dev/sync-vendored.js');
+    const canonical = tempDir();
+    fs.writeFileSync(path.join(canonical, 'SKILL.md'), 'upstream copy\n');
+    const result = spawnSync(process.execPath, [script, canonical, '--chek'], { encoding: 'utf8' });
+    assert.strictEqual(result.status, 2);
+    assert.match(result.stderr, /Unknown argument "--chek"/);
+    assert.doesNotMatch(result.stdout, /updated/);
+});

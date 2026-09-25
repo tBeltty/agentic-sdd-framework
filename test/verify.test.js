@@ -158,6 +158,28 @@ test('R15: with core.autocrlf, a committed spec checked out with CRLF is not an 
     assert.strictEqual(checkSpec({ root: clone }).ok, true, checkSpec({ root: clone }).report);
 });
 
+test('R17: a multi-line inline comment cannot swap the Status', () => {
+    const text = spec({ status: 'Completed' }).replace('**Status:** Completed', '**Status:** Draft')
+        .replace(/(\*\*Specification Mode:\*\*[^\n]*?)\s*\n\*\*Status:\*\* Draft/, '$1 <!--\n**Status:** Draft\n--> **Status:** Completed');
+    assert.match(text, /<!--\n\*\*Status:\*\* Draft\n-->/, 'fixture must wrap the Status line');
+    assert.match(lint(text).join(), /inline HTML comment \("<!--"\) is not closed on the same line/);
+});
+
+test('R18: a fence indented into an indented code block does not hide the tasks after it', () => {
+    const text = spec({ status: 'Draft' }) + '\nNotes follow.\n\n    ```\n* [ ] **T9:** still open\n';
+    assert.match(lint(text).join(), /fence is indented 4 spaces/);
+    const nested = spec({ status: 'Draft', checked: ['T1'] }).replace(
+        '  * **Evidence:** [command run and its literal output]',
+        '  * **Evidence:**\n    ```text\n    $ npm test\n    ok\n    ```'
+    );
+    assert.deepStrictEqual(lint(nested), [], 'a fence inside a list item is fine');
+});
+
+test('R19: raw <script>, <style>, or <textarea> tags are rejected; code spans that mention them are not', () => {
+    assert.match(lint(spec({ status: 'Draft' }) + '\n<style>\n**Status:** Completed\n</style>\n').join(), /raw HTML tags/);
+    assert.deepStrictEqual(lint(spec({ status: 'Draft' }) + '\nThe page loads `<script src="app.js">` last.\n'), []);
+});
+
 test('R10: in a shallow clone the spec check explains how to fetch the history', () => {
     const repo = liteProject(completedSpec(`${NODE} -e "console.log('ok')"`));
     return verify({ root: repo, record: true, log: quiet, date: '2026-09-25' }).then(() => {
@@ -170,6 +192,16 @@ test('R10: in a shallow clone the spec check explains how to fetch the history',
         const shallow = path.join(tempDir(), 'shallow');
         git(repo, 'clone', '-q', '--depth', '1', pathToFileURL(repo).href, shallow);
         assert.strictEqual(git(shallow, 'rev-parse', '--is-shallow-repository').trim(), 'true', 'fixture must be a shallow clone');
-        assert.throws(() => checkSpec({ root: shallow }), /shallow clone[\s\S]*fetch-depth: 0/);
+        const result = checkSpec({ root: shallow });
+        assert.strictEqual(result.ok, false);
+        assert.match(result.report, /shallow clone[\s\S]*fetch-depth: 0/);
+
+        // R16: when the spec was completed in the newest commit, a depth-1 clone can decide.
+        const exact = path.join(tempDir(), 'exact');
+        git(repo, 'reset', '-q', '--hard', 'HEAD~1');
+        git(repo, 'clone', '-q', '--depth', '1', pathToFileURL(repo).href, exact);
+        assert.strictEqual(git(exact, 'rev-parse', '--is-shallow-repository').trim(), 'true');
+        assert.strictEqual(checkSpec({ root: exact }).ok, true, checkSpec({ root: exact }).report);
+        assert.strictEqual(checkSpec({ root: exact, source: { kind: 'ref', ref: 'HEAD' } }).ok, true);
     });
 });

@@ -157,8 +157,8 @@ test('bracketed shell tests are commands, not placeholders; fenced indentation i
 test('F75: auditkit version comparison', () => {
     assert.deepStrictEqual(parseVersion('auditkit 0.3.0\n'), [0, 3, 0]);
     assert.strictEqual(versionAtLeast([0, 2, 9], MIN_AUDITKIT), false);
-    assert.strictEqual(versionAtLeast([0, 3, 1], MIN_AUDITKIT), false);
-    assert.strictEqual(versionAtLeast([0, 3, 2], MIN_AUDITKIT), true);
+    assert.strictEqual(versionAtLeast([0, 3, 2], MIN_AUDITKIT), false);
+    assert.strictEqual(versionAtLeast([0, 3, 3], MIN_AUDITKIT), true);
     assert.strictEqual(versionAtLeast([1, 0, 0], MIN_AUDITKIT), true);
 });
 
@@ -198,10 +198,10 @@ test('rigor mode reports a missing auditkit with install instructions', () => {
 
 test('F75: rigor mode rejects an auditkit older than the minimum', { skip: process.platform === 'win32' && 'uses a shell-script stub' }, () => {
     const stub = path.join(tempRepo(), 'auditkit');
-    fs.writeFileSync(stub, '#!/bin/sh\necho "auditkit 0.3.1"\n', { mode: 0o755 });
+    fs.writeFileSync(stub, '#!/bin/sh\necho "auditkit 0.3.2"\n', { mode: 0o755 });
     const result = withAuditkit(stub, () => checkSpec({ root: rigorProject() }));
     assert.strictEqual(result.ok, false);
-    assert.match(result.report, /older than 0\.3\.2/);
+    assert.match(result.report, /older than 0\.3\.3/);
 });
 
 test('rigor mode passes fresh templates and rejects DONE without evidence', { skip: !hasAuditkit && 'auditkit not installed' }, () => {

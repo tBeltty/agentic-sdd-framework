@@ -23,7 +23,7 @@ for recorded evidence) again before pushing a `Completed` spec.
 - `sdd-init` reuses the answers stored in an existing `sdd.config.json` as defaults; only explicit
   flags override them. The spec and Rigor documents are created at the configured
   `specification.specFile` and `specification.roadmapDir`.
-- Rigor mode requires `auditkit` 0.3.2 or newer. CI pins the protocol repository to v0.3.2.
+- Rigor mode requires `auditkit` 0.3.3 or newer. CI pins the protocol repository to v0.3.3.
 - Check scripts reject unknown flags (a typo checked the working tree instead) and accept
   `--ref <commit>` as well as `--ref=<commit>`.
 - Config paths must be canonical (`docs/SPEC.md`, not `./docs/SPEC.md`), and `specFile` and
@@ -41,8 +41,13 @@ for recorded evidence) again before pushing a `Completed` spec.
 - With `core.autocrlf` (the Windows default), a committed spec checked out with CRLF line endings
   was treated as uncommitted, so a later commit that did not touch the spec reopened it. The spec
   is now compared by Git object id with Git's line-ending filters applied.
-- In a shallow clone, a Completed spec failed with a misleading state mismatch; the check now
-  explains that the full history is needed.
+- In a shallow clone, a Completed spec failed with a misleading state mismatch. A depth-1 clone
+  whose newest commit completed the spec now passes; otherwise the failure explains that the full
+  history is needed.
+- More spec markup the parser could misread is rejected instead of guessed: an inline `<!--`
+  not closed on the same line, raw `<script>`/`<style>`/`<textarea>` tags, and a fence indented
+  so far that it renders as indented code.
+- `scripts/dev/sync-vendored.js` treated a mistyped flag as a write; unknown flags are errors.
 - The secret scanner reported expressions assigned to secret-named keys (`password = getPassword()`)
   and missed unquoted values in config, rc, shell, and Docker files and keys such as `SECRET_KEY`; one placeholder on a line hid a real key later on the
   same line; a NUL byte or UTF-16 encoding hid a file from the scan.

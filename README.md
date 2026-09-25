@@ -58,7 +58,7 @@ graph TD
   * `execution-guide.md`: the "how" (numbered tasks `P<phase>-T<n>` and gates `P<phase>-G<n>`).
   * `compliance-log.md`: the ledger of pasted command output and verdicts.
   * `annexes/`: self-contained remediation orders issued after a verdict that is not a clean `APPROVED`.
-* **Mechanical Checks:** the quality gate runs `auditkit lint` (0.3.2 or newer), which rejects missing or orphaned task entries, gates without a negative control, and `DONE` reports without pasted verify output.
+* **Mechanical Checks:** the quality gate runs `auditkit lint` (0.3.3 or newer), which rejects missing or orphaned task entries, gates without a negative control, and `DONE` reports without pasted verify output.
 * **Best For:** Multi-agent handoffs, asynchronous work, and regulated domains.
 
 ---

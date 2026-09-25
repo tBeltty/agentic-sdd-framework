@@ -218,7 +218,11 @@ test('R4: secret-named keys ending in _key, and unquoted values in shell, rc and
         ['export API_TOKEN=$(vault read -field=token secret/api)', 'deploy.sh'],
         ['API_TOKEN="${API_TOKEN:-}"', 'run.sh'],
         ['cache_key: user-profile-v2-abcdef123456', 'c.yml'],
-        ['primary_key = compute_primary_key(row)', 'a.py']
+        ['primary_key = compute_primary_key(row)', 'a.py'],
+        ['$password = Read-Host "Enter password" -AsSecureString', 'deploy.ps1'],
+        ['$credential = Get-Credential', 'deploy.ps1'],
+        ['$token = Get-AzAccessToken -ResourceUrl $url', 'deploy.ps1'],
+        ['$securePassword = ConvertTo-SecureString $plain -AsPlainText -Force', 'deploy.ps1']
     ]) {
         assert.deepStrictEqual(found(line, file), [], `${file}: ${line}`);
     }

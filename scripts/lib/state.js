@@ -59,13 +59,13 @@ function shallowBoundaries(root) {
     return new Set(fs.readFileSync(full, 'utf8').split('\n').filter(Boolean));
 }
 
-// The last commit (from `rev`) that changed `specPath`.
+// The last commit (from `rev`) that changed `specPath`, as a ref source. In a shallow clone
+// the history may end before that commit; then the result is the boundary commit, marked
+// `shallow`, and a state mismatch there cannot be told apart from a real one.
 function lastSpecCommit(root, rev, specPath) {
     const commit = tryGit(['--literal-pathspecs', 'log', '-1', '--format=%H', rev, '--', specPath], root);
-    if (commit && shallowBoundaries(root).has(commit)) {
-        throw new Error(`This is a shallow clone and the commit that completed ${specPath} is outside the fetched history. Fetch the full history (git fetch --unshallow; in GitHub Actions, actions/checkout with fetch-depth: 0).`);
-    }
-    return commit;
+    if (!commit) return null;
+    return { kind: 'ref', ref: commit, shallow: shallowBoundaries(root).has(commit) };
 }
 
 // The blob id the spec has in `source` (null when absent).
@@ -87,8 +87,7 @@ function specBlobId(root, source, specPath) {
 // The source whose state a spec at `specPath` must match, per the rules above.
 function referenceSourceFor(root, source, specPath) {
     if (source.kind === 'ref') {
-        const commit = lastSpecCommit(root, source.ref, specPath);
-        return commit ? { kind: 'ref', ref: commit } : source;
+        return lastSpecCommit(root, source.ref, specPath) || source;
     }
     const headHasCommit = tryGit(['rev-parse', '--verify', '--quiet', 'HEAD'], root) !== '';
     if (!headHasCommit) return source;
@@ -97,8 +96,7 @@ function referenceSourceFor(root, source, specPath) {
     const current = specBlobId(root, source, specPath);
     const committed = specBlobId(root, { kind: 'ref', ref: 'HEAD' }, specPath);
     if (!committed || !current || current !== committed) return source;
-    const commit = lastSpecCommit(root, 'HEAD', specPath);
-    return commit ? { kind: 'ref', ref: commit } : source;
+    return lastSpecCommit(root, 'HEAD', specPath) || source;
 }
 
 function currentCommit(root) {

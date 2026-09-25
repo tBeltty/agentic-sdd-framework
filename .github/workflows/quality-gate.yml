@@ -8,7 +8,7 @@ on:
 
 # The protocol release this framework vendors and tests against.
 env:
-  PROTOCOL_VERSION: v0.3.2
+  PROTOCOL_VERSION: v0.3.3
 
 jobs:
   verify:

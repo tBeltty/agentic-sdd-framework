@@ -7,11 +7,12 @@
  * Any checkbox list item is a task (bullets or numbered, also inside blockquotes); its ID
  * is the bold `**T1:**` prefix when present, otherwise "line N". Content inside fenced code
  * blocks and HTML comment blocks (a line starting with `<!--`, up to the line with `-->`) is
- * ignored, as it is when the Markdown is rendered. A `<!--` later in a line (inline code,
- * prose) starts nothing. Because renderers differ on edge cases, a comment block that holds
- * spec structure (a task, Status, a gate field, or a code fence) is reported as a problem
- * instead of being silently skipped. Line endings are normalized before parsing and
- * preserved when writing.
+ * ignored, as it is when the Markdown is rendered. Markup whose rendering the parser cannot
+ * follow exactly is reported as a problem instead of being guessed: a comment block that
+ * holds spec structure (a task, Status, a gate field, or a code fence), an inline `<!--`
+ * without `-->` on the same line, <script>/<style>/<textarea>-like tags, and a fence
+ * indented so far that CommonMark renders it as indented code. Line endings are normalized
+ * before parsing and preserved when writing.
  *
  * Records written by sdd-verify carry integrity hashes: task evidence covers its date, exit
  * code and transcript; "Last Verified" covers every field plus the verification command and
@@ -72,12 +73,55 @@ function visibleLines(lines, hidden = commentLines(lines)) {
     return uncommented(lines, hidden).map(line => (fence.update(line) || fence.inside ? '' : line));
 }
 
-// Problems for comment blocks that hold spec structure, which renderers may or may not show.
-function hiddenStructure(lines, hidden) {
-    return lines
-        .map((line, i) => (hidden[i] && STRUCTURE_RE.test(line) ? i : -1))
-        .filter(i => i !== -1)
-        .map(i => `Line ${i + 1}: an HTML comment holds spec structure (a task, Status, gate field, or code fence). Move it out of the comment or delete it.`);
+const LIST_ITEM_RE = /^(\s*)([*+-]|\d+[.)])(\s+)\S/;
+const HIDING_TAG_RE = /<\/?(?:script|style|textarea|template|noscript|title|xmp|iframe|noembed|noframes|plaintext)\b/i;
+const withoutCodeSpans = line => line.replace(/(`+)[^`]*?\1/g, '');
+
+// Largest indentation a fence opening at lines[at] may have and still be a fence: 3 spaces
+// past the content of the list item containing it, or 3 at the top level.
+function maxFenceIndent(lines, at) {
+    let minIndent = Infinity;
+    for (let i = at - 1; i >= 0; i--) {
+        const line = lines[i];
+        if (line.trim() === '') continue;
+        const item = line.match(LIST_ITEM_RE);
+        if (item) {
+            const content = item[1].length + item[2].length + Math.min(item[3].length, 4);
+            if (minIndent >= content && indentOf(lines[at]) >= content) return content + 3;
+        }
+        minIndent = Math.min(minIndent, indentOf(line));
+        if (minIndent === 0 && !item) return 3;
+    }
+    return 3;
+}
+
+// Problems for markup whose rendering could differ from what the parser reads.
+function ambiguousMarkup(lines, hidden) {
+    const problems = [];
+    const at = (i, what) => problems.push(`Line ${i + 1}: ${what}`);
+    const unquoted = lines.map(stripQuote);
+    const fence = createFenceTracker();
+    unquoted.forEach((line, i) => {
+        if (hidden[i]) {
+            if (STRUCTURE_RE.test(line)) at(i, 'an HTML comment holds spec structure (a task, Status, gate field, or code fence). Move it out of the comment or delete it.');
+            return;
+        }
+        const wasInside = fence.inside;
+        if (fence.update(line)) {
+            if (!wasInside && indentOf(line) > maxFenceIndent(unquoted, i)) {
+                at(i, `this fence is indented ${indentOf(line)} spaces, so Markdown renders it as indented code and everything after it stays visible. Indent it at most 3 spaces past its list item.`);
+            }
+            return;
+        }
+        if (fence.inside) return;
+        const prose = withoutCodeSpans(line);
+        const open = prose.indexOf('<!--');
+        if (open !== -1 && !prose.includes('-->', open + 4)) {
+            at(i, 'an inline HTML comment ("<!--") is not closed on the same line, so it may hide the lines after it. Close it on this line or remove it.');
+        }
+        if (HIDING_TAG_RE.test(prose)) at(i, 'raw HTML tags such as <script>, <style>, or <textarea> hide or alter what renders. Remove them from the specification.');
+    });
+    return problems;
 }
 
 // Integrity hash of task evidence: date, exit code and transcript together.
@@ -231,7 +275,7 @@ function parseSpec(rawText) {
         }
     }
     const { status, problem } = parseStatus(visible);
-    return { status, statusProblem: problem, tasks: parseTasks(lines), gate, hiddenProblems: hiddenStructure(lines, hidden) };
+    return { status, statusProblem: problem, tasks: parseTasks(lines), gate, hiddenProblems: ambiguousMarkup(lines, hidden) };
 }
 
 function withEol(original, normalizedLines) {

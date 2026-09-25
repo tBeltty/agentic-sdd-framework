@@ -48,8 +48,9 @@ const SECRET_PATTERNS = [
 const SECRET_KEY_RE = /(?:^|[^A-Za-z0-9_])([A-Za-z0-9_.-]*?(?:secret|token|passw(?:or)?d|pwd|credentials?|(?:api|private|access|secret|signing|encryption|master)[_-]?key))["']?\s*[:=]\s*(.*)$/i;
 const PASSWORD_KEY_RE = /passw(?:or)?d|pwd|secret|credential/i;
 // Files where an unquoted value is a literal (KEY=value), not a code expression: env and
-// config files, package manager rc files, shell scripts, and Dockerfiles.
-const CONFIG_FILE_RE = /(^|\/)(\.env[^/]*|\.npmrc|\.pypirc|\.yarnrc(\.yml)?|Dockerfile[^/]*|Containerfile)$|\.(env|ini|cfg|conf|properties|toml|ya?ml|json|sh|bash|zsh|ps1|tfvars|dockerfile)$/i;
+// config files, package manager rc files, POSIX shell scripts, and Dockerfiles. PowerShell
+// is not included: its right-hand sides are expressions (Read-Host, Get-Credential, ...).
+const CONFIG_FILE_RE = /(^|\/)(\.env[^/]*|\.npmrc|\.pypirc|\.yarnrc(\.yml)?|Dockerfile[^/]*|Containerfile)$|\.(env|ini|cfg|conf|properties|toml|ya?ml|json|sh|bash|zsh|tfvars|dockerfile)$/i;
 
 // Shannon entropy in bits per character.
 function entropy(value) {

@@ -32,9 +32,9 @@ const { parseSpec } = require('./lib/spec');
 const { stateOf, referenceSourceFor } = require('./lib/state');
 
 const AUDITKIT_INSTALL = 'pipx install git+https://github.com/tBeltty/auditor-executor-protocol';
-const MIN_AUDITKIT = [0, 3, 2];
+const MIN_AUDITKIT = [0, 3, 3];
 
-function lintLiteSpec(text, { requireRecordedEvidence = false, expectedState = null } = {}) {
+function lintLiteSpec(text, { requireRecordedEvidence = false, expectedState = null, shallow = false } = {}) {
     const spec = parseSpec(text);
     const problems = [];
     const notes = [];
@@ -80,7 +80,9 @@ function lintLiteSpec(text, { requireRecordedEvidence = false, expectedState = n
         } else if (last.result !== 'PASS' || last.exit !== '0') {
             problems.push(`Status is "completed" but the last verification is ${last.result} (exit ${last.exit}). Fix it and run sdd-verify --record.`);
         } else if (expectedState && last.state !== expectedState) {
-            problems.push(`The recorded verification (state ${last.state}) does not match the content the spec was completed with (state ${expectedState}). Files changed after sdd-verify ran; run it again.`);
+            problems.push(shallow
+                ? `The recorded verification (state ${last.state}) does not match the oldest commit in this shallow clone (state ${expectedState}), and the commit that completed the spec may be older. Fetch the full history (git fetch --unshallow; in GitHub Actions, actions/checkout with fetch-depth: 0).`
+                : `The recorded verification (state ${last.state}) does not match the content the spec was completed with (state ${expectedState}). Files changed after sdd-verify ran; run it again.`);
         }
     }
     return { status: shownStatus, spec, problems, notes };
@@ -173,10 +175,12 @@ function run({ root, source = WORKTREE } = {}) {
     }
     const text = buffer.toString('utf8');
     const completed = parseSpec(text).status === 'completed';
-    const expectedState = completed ? stateOf(root, referenceSourceFor(root, source, specFile), specFile) : null;
+    const reference = completed ? referenceSourceFor(root, source, specFile) : null;
+    const expectedState = reference ? stateOf(root, reference, specFile) : null;
     const { status, spec, problems, notes } = lintLiteSpec(text, {
         requireRecordedEvidence: getIn(config, 'specification.requireRecordedEvidence', false),
-        expectedState
+        expectedState,
+        shallow: Boolean(reference && reference.shallow)
     });
     const done = spec.tasks.filter(t => t.checked).length;
     const summary = `${specFile}: status "${status}", ${done}/${spec.tasks.length} task(s) checked`;
