@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const { parseSpec } = require('../scripts/lib/spec');
 const { lintLiteSpec, run: checkSpec } = require('../scripts/check-spec');
 const { matchExpected, parseArgs, verify, recordTask } = require('../scripts/sdd-verify');
@@ -153,7 +154,8 @@ test('R10: in a shallow clone the spec check explains how to fetch the history',
         git(repo, 'commit', '-q', '-m', 'next');
         assert.strictEqual(checkSpec({ root: repo }).ok, true, 'full clone');
         const shallow = path.join(tempDir(), 'shallow');
-        git(repo, 'clone', '-q', '--depth', '1', `file://${repo.split(path.sep).join('/')}`, shallow);
+        git(repo, 'clone', '-q', '--depth', '1', pathToFileURL(repo).href, shallow);
+        assert.strictEqual(git(shallow, 'rev-parse', '--is-shallow-repository').trim(), 'true', 'fixture must be a shallow clone');
         assert.throws(() => checkSpec({ root: shallow }), /shallow clone[\s\S]*fetch-depth: 0/);
     });
 });
