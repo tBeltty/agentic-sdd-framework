@@ -2,104 +2,113 @@
 
 /**
  * scripts/check-copy-slop.js
- * 
- * Linter for AI-generated writing clichés, buzzwords, and banned patterns.
+ *
+ * Linter for AI-generated writing clichés, buzzwords, and banned patterns in prose
+ * (.md, .mdx, .txt). Code blocks, inline code and table rows are not checked.
  * Inspired by https://github.com/petergyang/no-ai-slop (MIT License).
+ *
+ * Config (sdd.config.json -> capabilities.noAiSlop):
+ *   enabled      false skips the check (default true)
+ *   exclude      path prefixes to skip
+ *   maxEmDashes  em dashes allowed per file (default 1)
  */
 
-const { execSync } = require('child_process');
-const fs = require('fs');
-const path = require('path');
+const { repoRoot, listFiles, readFile, isBinary } = require('./lib/git');
+const { loadConfig, getIn } = require('./lib/config');
+const { BANNED_PATTERNS } = require('./lib/slop-patterns');
 
-const BANNED_PATTERNS = [
-    {
-        name: 'Binary Contrast ("not X, it is Y")',
-        regex: /\b(it['’]?s not\b.+?\bit['’]?s\b|it is not\b.+?\bit is\b|no es\b.+?\bes\b)/i
-    },
-    {
-        name: 'Throat-Clearing Opener',
-        regex: /\b(here['’]?s the thing|it is worth noting that|it['’]?s worth noting that|cabe destacar que)\b/i
-    },
-    {
-        name: 'Colon Reveal Hook',
-        regex: /\b(the best part|lo mejor)\s*:\s*/i
-    },
-    {
-        name: 'AI Buzzword: Delve / Leverage / Streamline / Supercharge',
-        regex: /\b(delve|delving|foster|fostering|leverage|leveraging|streamline|streamlining|supercharge|supercharging|paradigm shift|game changer|tapestry)\b/i
-    },
-    {
-        name: 'Fake-Profound Conclusion',
-        regex: /\b(the future is already here|in conclusion|el futuro ya est[aá] aqu[ií]|en conclusi[oó]n)\b/i
-    }
+const PROSE_EXTENSIONS = ['.md', '.mdx', '.txt'];
+
+// The skill that defines the banned patterns must quote them; vendored skills are
+// synced from their upstream repositories and linted there.
+const DEFAULT_EXCLUDE = [
+    '.agents/skills/no-ai-slop/',
+    '.agents/skills/auditor-executor-protocol/'
 ];
 
-// Files exempt from linting (e.g. the slop detector definitions themselves)
-const EXEMPT_FILES = [
-    'scripts/check-copy-slop.js',
-    '.agents/skills/no-ai-slop/SKILL.md'
-];
+function lintContent(content, { maxEmDashes = 1 } = {}) {
+    const violations = [];
+    const emDashLines = [];
+    let inFence = false;
 
-function getTargetFiles() {
-    try {
-        const isStagedOnly = process.argv.includes('--staged');
-        let cmd = isStagedOnly 
-            ? 'git diff --name-only --cached --diff-filter=ACMR'
-            : 'git ls-files';
-        
-        const output = execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
-        if (!output) return [];
-        return output.split('\n')
-            .filter(f => f.endsWith('.md') || f.endsWith('.txt') || f.endsWith('.json'))
-            .filter(f => !EXEMPT_FILES.some(exempt => f.endsWith(exempt)));
-    } catch {
-        return [];
-    }
-}
+    content.split('\n').forEach((rawLine, index) => {
+        const trimmed = rawLine.trim();
+        if (/^(```|~~~)/.test(trimmed)) {
+            inFence = !inFence;
+            return;
+        }
+        if (inFence || trimmed.startsWith('|') || /^-{3,}$/.test(trimmed)) return;
 
-const files = getTargetFiles();
-const violations = [];
-
-files.forEach(file => {
-    if (!fs.existsSync(file)) return;
-    const content = fs.readFileSync(file, 'utf8');
-    const lines = content.split('\n');
-
-    lines.forEach((line, lineIndex) => {
-        // Skip markdown tables or horizontal rules
-        if (line.trim().startsWith('|') || line.trim().startsWith('---')) return;
+        const line = rawLine.replace(/`[^`]*`/g, '``');
+        if (line.includes('—')) emDashLines.push(index + 1);
 
         for (const pattern of BANNED_PATTERNS) {
             const match = line.match(pattern.regex);
             if (match) {
                 violations.push({
-                    file,
-                    line: lineIndex + 1,
+                    line: index + 1,
                     pattern: pattern.name,
                     matchedText: match[0].trim(),
-                    lineText: line.trim().slice(0, 100)
+                    lineText: trimmed.slice(0, 100)
                 });
                 break;
             }
         }
     });
-});
 
-console.log('\n======================================================');
-console.log('  ✍️  Agentic SDD Framework: No-AI-Slop Copy Linter');
-console.log('======================================================\n');
-
-if (violations.length > 0) {
-    console.error(`❌ Found ${violations.length} AI writing pattern violation(s):\n`);
-    violations.forEach(v => {
-        console.error(`  - File: ${v.file}:${v.line}`);
-        console.error(`    Pattern: ${v.pattern}`);
-        console.error(`    Matched: "${v.matchedText}"`);
-        console.error(`    Context: ${v.lineText}\n`);
-    });
-    console.error('Action: Rewrite directly without empty filler or binary contrasts.\n');
-    process.exit(1);
-} else {
-    console.log(`✅ Scanned ${files.length} file(s). Zero AI slop patterns detected.\n`);
-    process.exit(0);
+    if (emDashLines.length > maxEmDashes) {
+        violations.push({
+            line: emDashLines[0],
+            pattern: `Em Dash Overuse (${emDashLines.length} found, max ${maxEmDashes} per file)`,
+            matchedText: '—',
+            lineText: `lines ${emDashLines.join(', ')}`
+        });
+    }
+    return violations;
 }
+
+function run({ root = repoRoot(), staged = false } = {}) {
+    const config = loadConfig(root);
+    if (getIn(config, 'capabilities.noAiSlop.enabled', true) === false) {
+        return { ok: true, report: '⏭️  No-AI-Slop linter disabled in sdd.config.json.' };
+    }
+    const exclude = [...DEFAULT_EXCLUDE, ...getIn(config, 'capabilities.noAiSlop.exclude', [])];
+    const maxEmDashes = getIn(config, 'capabilities.noAiSlop.maxEmDashes', 1);
+
+    const files = listFiles(root, { staged })
+        .filter(f => PROSE_EXTENSIONS.some(ext => f.endsWith(ext)))
+        .filter(f => !exclude.some(prefix => f.startsWith(prefix)));
+
+    const violations = [];
+    for (const file of files) {
+        const buffer = readFile(root, file, { staged });
+        if (!buffer || isBinary(buffer)) continue;
+        for (const v of lintContent(buffer.toString('utf8'), { maxEmDashes })) {
+            violations.push({ file, ...v });
+        }
+    }
+
+    if (violations.length === 0) {
+        return { ok: true, report: `✅ Scanned ${files.length} file(s). Zero AI slop patterns detected.` };
+    }
+    const lines = [`❌ Found ${violations.length} AI writing pattern violation(s):\n`];
+    for (const v of violations) {
+        lines.push(`  - File: ${v.file}:${v.line}`);
+        lines.push(`    Pattern: ${v.pattern}`);
+        lines.push(`    Matched: "${v.matchedText}"`);
+        lines.push(`    Context: ${v.lineText}\n`);
+    }
+    lines.push('Action: Rewrite directly without empty filler or binary contrasts.');
+    return { ok: false, report: lines.join('\n') };
+}
+
+if (require.main === module) {
+    console.log('\n======================================================');
+    console.log('  ✍️  Agentic SDD Framework: No-AI-Slop Copy Linter');
+    console.log('======================================================\n');
+    const result = run({ staged: process.argv.includes('--staged') });
+    (result.ok ? console.log : console.error)(result.report + '\n');
+    process.exit(result.ok ? 0 : 1);
+}
+
+module.exports = { lintContent, run };

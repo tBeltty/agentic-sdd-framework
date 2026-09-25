@@ -20,5 +20,8 @@ jobs:
         with:
           node-version: 20
 
+      - name: Run Framework Tests
+        run: npm test
+
       - name: Execute Quality Gate Suite
         run: npm run quality-gate

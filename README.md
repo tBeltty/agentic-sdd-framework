@@ -45,12 +45,12 @@ graph TD
     D1 --> D2[Negative Control Gates]
 ```
 
-### 1. 🟢 Lite Mode (Default — Solo Developers)
+### 1. 🟢 Lite Mode (Default, Solo Developers)
 * **Single Entry Point:** Everything lives in `docs/SPEC.md` (Context, Architecture, Atomic Tasks, and Gate).
 * **Verifiable Gate:** Requires a passing terminal command and expected output before closing.
 * **Best For:** Solo developers, utilities, early-stage MVPs.
 
-### 2. 🔴 Rigor Mode (Opt-In — Multi-Agent Teams)
+### 2. 🔴 Rigor Mode (Opt-In, Multi-Agent Teams)
 * **The 4-Document Quartet:**
   * `PLAN_OF_RECORD.md`: The "What" and "Why" (Phases and trade-offs).
   * `EXECUTION_GUIDE.md`: The "How" (Numbered tasks `P<phase>-T<n>` and gates `P<phase>-G<n>`).

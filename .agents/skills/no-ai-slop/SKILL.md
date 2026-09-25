@@ -40,3 +40,13 @@ Do not use decorative buzzwords that inflate importance without adding technical
 1. **Active Voice & Factual Density:** Explain what the code does, what parameters it receives, and what command validates it.
 2. **State Measurable Facts:** Replace "ultra-fast performance" with measured latency or memory consumption (for example: "< 30MB RAM, < 50ms startup").
 3. **No Unverifiable Claims:** If a metric has not been empirically benchmarked, do not state it as fact.
+
+---
+
+## 🔧 Automated Enforcement
+
+`scripts/check-copy-slop.js` enforces the high-precision subset of these rules on `.md`, `.mdx`, and `.txt` files, using the pattern list in `scripts/lib/slop-patterns.js`. Keep that file and this skill in sync.
+
+* **Enforced:** every banned verb, adjective, and noun above; binary contrast (English and Spanish); throat-clearing; colon reveal; faux-insight; fake-profound endings; em dashes above `capabilities.noAiSlop.maxEmDashes` per file (default 1).
+* **Guidance only:** the empty adverbs (simply, actually, literally, honestly) and importance puffery. They have legitimate technical uses, so automated checks would produce false positives.
+* **Not checked:** fenced code blocks, inline code, and table rows.

@@ -49,8 +49,8 @@ This skill governs how AI agents must act when evaluating architectures, bootstr
 
 ## 🛠️ Step-by-Step Workflow
 
-1. **Step 1 — Discovery:** Ask probing questions about scale, hardware, compute, and modularity.
-2. **Step 2 — Research:** Search current documentation and benchmarks for the validated constraints.
-3. **Step 3 — Architecture Record:** Produce `ADR-0001` with pros, cons, and alternatives considered.
-4. **Step 4 — Provisioning:** Set up repo via `gh`, 3-tier secrets vault, and `.gitignore`.
-5. **Step 5 — Execution:** Hand off tasks to the Auditor / Executor protocol with verifiable exit gates.
+1. **Step 1 (Discovery):** Ask probing questions about scale, hardware, compute, and modularity.
+2. **Step 2 (Research):** Search current documentation and benchmarks for the validated constraints.
+3. **Step 3 (Architecture Record):** Produce `ADR-0001` with pros, cons, and alternatives considered.
+4. **Step 4 (Provisioning):** Set up repo via `gh`, 3-tier secrets vault, and `.gitignore`.
+5. **Step 5 (Execution):** Hand off tasks to the Auditor / Executor protocol with verifiable exit gates.

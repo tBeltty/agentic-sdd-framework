@@ -4,6 +4,7 @@
   "description": "The Universal Open-Source Operating System for Spec-Driven Development with AI Agents",
   "main": "scripts/sdd-init.js",
   "scripts": {
+    "test": "node --test",
     "init": "node scripts/sdd-init.js",
     "check:prereqs": "node scripts/check-system-prerequisites.js",
     "check:secrets": "node scripts/verify-no-secrets.js",
