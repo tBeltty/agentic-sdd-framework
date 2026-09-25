@@ -38,6 +38,9 @@ for recorded evidence) again before pushing a `Completed` spec.
   scanned in push mode or with `--staged`.
 - Reading more than 256 MB of tracked content from a commit or the index failed with ENOBUFS;
   blobs are now read in bounded batches.
+- With `core.autocrlf` (the Windows default), a committed spec checked out with CRLF line endings
+  was treated as uncommitted, so a later commit that did not touch the spec reopened it. The spec
+  is now compared by Git object id with Git's line-ending filters applied.
 - In a shallow clone, a Completed spec failed with a misleading state mismatch; the check now
   explains that the full history is needed.
 - The secret scanner reported expressions assigned to secret-named keys (`password = getPassword()`)

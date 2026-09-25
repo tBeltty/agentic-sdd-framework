@@ -17,7 +17,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { git, readFile, WORKTREE } = require('./git');
+const { git, WORKTREE } = require('./git');
 
 function tryGit(args, root) {
     try {
@@ -61,11 +61,27 @@ function shallowBoundaries(root) {
 
 // The last commit (from `rev`) that changed `specPath`.
 function lastSpecCommit(root, rev, specPath) {
-    const commit = tryGit(['log', '-1', '--format=%H', rev, '--', specPath], root);
+    const commit = tryGit(['--literal-pathspecs', 'log', '-1', '--format=%H', rev, '--', specPath], root);
     if (commit && shallowBoundaries(root).has(commit)) {
         throw new Error(`This is a shallow clone and the commit that completed ${specPath} is outside the fetched history. Fetch the full history (git fetch --unshallow; in GitHub Actions, actions/checkout with fetch-depth: 0).`);
     }
     return commit;
+}
+
+// The blob id the spec has in `source` (null when absent).
+function specBlobId(root, source, specPath) {
+    if (source.kind === 'worktree') {
+        const full = path.join(root, specPath);
+        if (!fs.existsSync(full)) return null;
+        return tryGit(['hash-object', `--path=${specPath}`, full], root) || null;
+    }
+    const listing = source.kind === 'ref'
+        ? tryGit(['--literal-pathspecs', 'ls-tree', '-z', source.ref, '--', specPath], root)
+        : tryGit(['--literal-pathspecs', 'ls-files', '-s', '-z', '--', specPath], root);
+    const record = listing.split('\0').find(Boolean);
+    if (!record) return null;
+    const fields = record.slice(0, record.indexOf('\t')).split(' ');
+    return source.kind === 'ref' ? fields[2] : fields[1];
 }
 
 // The source whose state a spec at `specPath` must match, per the rules above.
@@ -76,14 +92,11 @@ function referenceSourceFor(root, source, specPath) {
     }
     const headHasCommit = tryGit(['rev-parse', '--verify', '--quiet', 'HEAD'], root) !== '';
     if (!headHasCommit) return source;
-    const current = readFile(root, specPath, source);
-    let committed = null;
-    try {
-        committed = readFile(root, specPath, { kind: 'ref', ref: 'HEAD' });
-    } catch {
-        committed = null;
-    }
-    if (!committed || !current || !current.equals(committed)) return source;
+    // Compared as Git object ids, with the working-tree file passed through Git's filters,
+    // so line-ending conversion (core.autocrlf) does not look like an uncommitted edit.
+    const current = specBlobId(root, source, specPath);
+    const committed = specBlobId(root, { kind: 'ref', ref: 'HEAD' }, specPath);
+    if (!committed || !current || current !== committed) return source;
     const commit = lastSpecCommit(root, 'HEAD', specPath);
     return commit ? { kind: 'ref', ref: commit } : source;
 }

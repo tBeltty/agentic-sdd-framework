@@ -144,6 +144,20 @@ test('a missing lite spec fails the gate; the framework repository is exempt', (
     assert.strictEqual(checkSpec({ root: repo }).ok, true);
 });
 
+test('R15: with core.autocrlf, a committed spec checked out with CRLF is not an uncommitted edit', async () => {
+    const repo = liteProject(completedSpec(`${NODE} -e "console.log('ok')"`));
+    await verify({ root: repo, record: true, log: quiet, date: '2026-09-25' });
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-q', '-m', 'complete');
+    writeFiles(repo, { 'src/app.txt': 'v2\n' });
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-q', '-m', 'next feature');
+    const clone = path.join(tempDir(), 'crlf');
+    git(repo, 'clone', '-q', '-c', 'core.autocrlf=true', pathToFileURL(repo).href, clone);
+    assert.match(fs.readFileSync(path.join(clone, 'docs/SPEC.md'), 'utf8'), /\r\n/, 'fixture must check out CRLF');
+    assert.strictEqual(checkSpec({ root: clone }).ok, true, checkSpec({ root: clone }).report);
+});
+
 test('R10: in a shallow clone the spec check explains how to fetch the history', () => {
     const repo = liteProject(completedSpec(`${NODE} -e "console.log('ok')"`));
     return verify({ root: repo, record: true, log: quiet, date: '2026-09-25' }).then(() => {
