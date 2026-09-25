@@ -63,54 +63,114 @@ graph TD
 
 ## ⚡ Quickstart
 
-### 1. Interactive Bootstrapping (Guided Mode)
-Run the built-in wizard to conduct system diagnostics and configure project governance:
+Requires Node.js 18.17 or newer and Git. The framework has zero npm dependencies and works for projects in any language.
+
+### 1. Install into a Project (Recommended)
+Run the wizard from the root of a new or existing Git repository:
 
 ```bash
-# Clone the repository
+cd my-project
+npx github:tBeltty/agentic-sdd-framework
+```
+
+Express mode skips the interview and takes every answer from flags:
+
+```bash
+npx github:tBeltty/agentic-sdd-framework --express --mode=lite --ast=ast-grep --runtime=go-1.23
+```
+
+### 2. Start from a Clone
+Use the framework repository itself as the starting point of a new project:
+
+```bash
 git clone https://github.com/tBeltty/agentic-sdd-framework.git my-project
 cd my-project
-
-# Run interactive setup wizard (Zero npm dependencies required)
 node scripts/sdd-init.js
 ```
 
-### 2. Rapid Bootstrapping (Express Mode)
-For senior engineers wanting instant provisioning via CLI flags:
+### Wizard Flags
 
-```bash
-node scripts/sdd-init.js --express --mode=lite --ast=ast-grep --runtime=go-1.23
-```
+| Flag | Values | Default |
+| :--- | :--- | :--- |
+| `--express` | Non-interactive run | Guided mode on a terminal |
+| `--target=<dir>` | Project to provision | Current directory |
+| `--name=<name>` | Project name | Target directory name |
+| `--runtime=<id>` | `node-22-lts`, `go-1.23`, `python-3.12`, ... | `node-22-lts` |
+| `--mode=<mode>` | `lite`, `rigor` | `lite` |
+| `--ast=<adapter>` | `ast-grep`, `graphify`, `ripgrep`, `lsp` | `ast-grep` |
+| `--concurrency=`, `--hardware=`, `--workload=` | Discovery answers recorded in ADR-0001 | Small internal service |
+| `--i18n`, `--pwa` | Enable the capability flags | Disabled |
+| `--force` | Refresh copied skills and templates | Keep existing copies |
+
+Rerunning the wizard is safe. Existing documents are kept, `sdd.config.json` is merged (custom keys survive), and `AGENTS.md` / `CLAUDE.md` are only rewritten while they carry the `sdd:managed` marker.
+
+### What the Wizard Generates
+
+| Path | Purpose |
+| :--- | :--- |
+| `AGENTS.md` | Entry point read automatically by Codex, Cursor, and other AGENTS.md-aware agents |
+| `CLAUDE.md` | Imports the entry point, constitution, and context into Claude Code |
+| `.claude/skills/` | Symlinks to `.agents/skills/` so Claude Code loads each skill on demand |
+| `.agents/AGENTS.md` | Constitution: 8 non-negotiable rules, each with a "Why this rule exists" field |
+| `.agents/CONTEXT.md` | Project facts, incident registry, technical debt, and non-goals |
+| `docs/SPEC.md` (Lite) or `docs/roadmap/*.md` (Rigor) | Active specification documents |
+| `docs/decisions/ADR-0001-stack-and-architecture.md` | Stack decision record seeded with the discovery answers |
+| `sdd.config.json` | Capability manifest read by the quality gate |
+| `.sdd/scripts/` | Quality gate tooling (install mode only) |
+| Git `pre-push` hook | Runs the quality gate; an existing hook is kept as `pre-push.local` and runs first |
 
 ---
 
-## 🧠 The Agent Sandboxing Core
+## 🚦 Quality Gate
+
+`node scripts/quality-gate.js` (`node .sdd/scripts/quality-gate.js` in installed projects) runs every check in one process and exits 1 if any fails. Add `--staged` to check the Git index instead of all tracked files.
+
+| Check | Script | Configuration (`sdd.config.json`) |
+| :--- | :--- | :--- |
+| Secret leak scanner | `verify-no-secrets.js` | Add `sdd-allow-secret` to a line to accept a known false positive |
+| No-AI-Slop copy linter | `check-copy-slop.js` | `capabilities.noAiSlop.enabled`, `.exclude`, `.maxEmDashes` |
+| File size limit | `check-file-size.js` | `architecture.maxLocPerFile` (0 disables), `architecture.maxLocExclude` |
+| Version sync | `check-versions.js` | Applies only when `project.type` is `framework` |
+
+`check-system-prerequisites.js` (Git identity, `gh` authentication, SSH keys) runs once inside the wizard and is available as `npm run check:prereqs`. It is not part of the gate because it depends on the local machine, not on the code.
+
+---
+
+## 🧠 Repository Layout
 
 ```text
 agentic-sdd-framework/
 ├── .agents/
-│   ├── AGENTS.md                  # 10 Non-negotiable laws with "# Why this rule exists"
-│   ├── CONTEXT.md                 # Operational memory and incident registry
+│   ├── AGENTS.template.md         # Constitution template (8 rules)
+│   ├── CONTEXT.template.md        # Operational memory template
+│   ├── ENTRYPOINT.template.md     # Root AGENTS.md template
 │   └── skills/
 │       ├── strategic-cto/         # 4-Pillar Discovery, Anti-Bloat, ROI Verdict
-│       ├── auditor-executor/      # Execution engine (tBeltty/auditor-executor-protocol)
-│       ├── no-ai-slop/            # Factual copy filter (petergyang/no-ai-slop)
+│       ├── auditor-executor-protocol/ # Execution engine (tBeltty/auditor-executor-protocol)
+│       ├── no-ai-slop/            # Factual copy rules (petergyang/no-ai-slop)
 │       └── ast-navigator/         # Pluggable adapters (graphify, ast-grep, ripgrep, lsp)
 │
 ├── docs/
 │   ├── SPEC_TEMPLATE.md           # Lite Mode template
-│   ├── decisions/ADR-0001.md      # Architecture Decision Record template
-│   ├── roadmap/                   # Rigor Mode Quartet templates
-│   └── guidelines/                # Zero-trust secrets, AST navigation, testing rules
+│   ├── decisions/ADR_TEMPLATE.md  # Architecture Decision Record template
+│   ├── roadmap/                   # Rigor Mode document templates
+│   ├── incidents/                 # Post-mortem template
+│   ├── guides/                    # Credential tiers, GitHub CLI setup
+│   └── guidelines/                # AST navigation adapter comparison
 │
 ├── scripts/
-│   ├── sdd-init.js                # Dual-mode bootstrapping wizard
-│   ├── check-system-prerequisites.js # Day-0 Git, gh CLI, and runtime checks
-│   ├── verify-no-secrets.js       # Pre-commit credential scanner
-│   ├── check-copy-slop.js         # Automated No-AI-Slop linter
-│   └── check-versions.js          # Monorepo version sync validator
+│   ├── sdd-init.js                # Bootstrapping wizard (guided and express)
+│   ├── quality-gate.js            # Runs every check below
+│   ├── verify-no-secrets.js       # Credential scanner
+│   ├── check-copy-slop.js         # No-AI-Slop linter
+│   ├── check-file-size.js         # maxLocPerFile enforcement
+│   ├── check-versions.js          # Framework version sync
+│   ├── check-system-prerequisites.js # Day-0 Git, gh CLI, and SSH checks
+│   ├── install-git-hooks.js       # pre-push hook installer
+│   └── lib/                       # Shared helpers and provisioning logic
 │
-└── sdd.config.json                # Active capability manifest
+├── test/                          # node:test suites (npm test)
+└── sdd.config.json                # Capability manifest of this repository
 ```
 
 ---

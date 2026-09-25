@@ -15,6 +15,7 @@ const { repoRoot } = require('./lib/git');
 const CHECKS = [
     { title: '🔒 Secret Leak Scanner', module: require('./verify-no-secrets') },
     { title: '✍️  No-AI-Slop Copy Linter', module: require('./check-copy-slop') },
+    { title: '📏 File Size Limit', module: require('./check-file-size') },
     { title: '🏷️  Version Sync Check', module: require('./check-versions') }
 ];
 

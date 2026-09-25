@@ -21,7 +21,7 @@ const SPEC_MODES = ['lite', 'rigor'];
 const AST_ADAPTERS = ['ast-grep', 'graphify', 'ripgrep', 'lsp'];
 const TOOL_DIR = '.sdd/scripts';
 const TOOL_FILES = [
-    'quality-gate.js', 'verify-no-secrets.js', 'check-copy-slop.js', 'check-versions.js',
+    'quality-gate.js', 'verify-no-secrets.js', 'check-copy-slop.js', 'check-file-size.js', 'check-versions.js',
     'check-system-prerequisites.js', 'install-git-hooks.js', 'lib'
 ];
 const TEMPLATES = [
