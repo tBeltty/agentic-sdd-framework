@@ -8,7 +8,7 @@ This file records the cumulative architectural decisions, production incidents, 
 
 * **Project Name:** [Project Name]
 * **Specification Mode:** Lite | Rigor
-* **Primary Runtime:** [e.g. Node.js 22 LTS, Go 1.23, Python 3.12]
+* **Primary Runtime:** [e.g. Node.js 24 LTS, Go 1.23, Python 3.12]
 * **Architecture Style:** Clean Architecture | Standard MVC | Modular Monolith
 * **Active Capabilities:**
   * No-AI-Slop Linter: [Enabled / Disabled]

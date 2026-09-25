@@ -21,7 +21,7 @@ Document the application requirements and the results of the **4-Pillar Discover
 
 State the selected technologies across each layer of the application:
 
-* **Backend Runtime & Framework:** [e.g. Go with standard net/http, Node.js 22 LTS with Hono, Python 3.12 with FastAPI]
+* **Backend Runtime & Framework:** [e.g. Go with standard net/http, Node.js 24 LTS with Hono, Python 3.12 with FastAPI]
 * **Frontend Architecture:** [e.g. Static Single Page Application (Vite + React), Server-Rendered HTML, CLI tool]
 * **Persistence Engine:** [e.g. SQLite with WAL mode, PostgreSQL 16, Flat JSON files]
 * **Code Navigation Adapter:** [e.g. Graphify, ast-grep, ripgrep]

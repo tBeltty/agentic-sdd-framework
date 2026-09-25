@@ -3,7 +3,7 @@
   "project": {
     "name": "agentic-sdd-framework",
     "type": "framework",
-    "runtime": "node-20-lts"
+    "runtime": "node-24-lts"
   },
   "specification": {
     "mode": "lite",

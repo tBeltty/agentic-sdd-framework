@@ -26,10 +26,12 @@ const checks = [];
 // 1. Check Node.js Version
 const nodeVersion = process.version;
 const majorVersion = parseInt(nodeVersion.replace(/^v/, '').split('.')[0], 10);
-if (majorVersion >= 18) {
-    checks.push({ name: 'Node.js Runtime', status: 'PASS', detail: `Version ${nodeVersion} (>= 18.x required)` });
+// Oldest Node.js release line still maintained upstream.
+const MIN_NODE_MAJOR = 22;
+if (majorVersion >= MIN_NODE_MAJOR) {
+    checks.push({ name: 'Node.js Runtime', status: 'PASS', detail: `Version ${nodeVersion} (>= ${MIN_NODE_MAJOR} required)` });
 } else {
-    checks.push({ name: 'Node.js Runtime', status: 'FAIL', detail: `Version ${nodeVersion} detected. Node 18.x or higher is required.` });
+    checks.push({ name: 'Node.js Runtime', status: 'FAIL', detail: `Version ${nodeVersion} detected. Node.js ${MIN_NODE_MAJOR} LTS or newer is required.` });
 }
 
 // 2. Check Git Installation

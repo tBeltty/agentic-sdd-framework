@@ -63,7 +63,7 @@ graph TD
 
 ## ⚡ Quickstart
 
-Requires Node.js 18.17 or newer and Git. The framework has zero npm dependencies and works for projects in any language.
+Requires Node.js 22 LTS or newer (24 LTS recommended) and Git. The framework has zero npm dependencies and works for projects in any language.
 
 ### 1. Install into a Project (Recommended)
 Run the wizard from the root of a new or existing Git repository:
@@ -95,7 +95,7 @@ node scripts/sdd-init.js
 | `--express` | Non-interactive run | Guided mode on a terminal |
 | `--target=<dir>` | Project to provision | Current directory |
 | `--name=<name>` | Project name | Target directory name |
-| `--runtime=<id>` | `node-22-lts`, `go-1.23`, `python-3.12`, ... | `node-22-lts` |
+| `--runtime=<id>` | `node-24-lts`, `go-1.23`, `python-3.12`, ... | `node-24-lts` |
 | `--mode=<mode>` | `lite`, `rigor` | `lite` |
 | `--ast=<adapter>` | `ast-grep`, `graphify`, `ripgrep`, `lsp` | `ast-grep` |
 | `--concurrency=`, `--hardware=`, `--workload=` | Discovery answers recorded in ADR-0001 | Small internal service |

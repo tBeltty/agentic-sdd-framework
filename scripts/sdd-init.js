@@ -14,7 +14,7 @@
  * Flags:
  *   --target=<dir>        Project to provision (default: current directory)
  *   --name=<name>         Project name (default: target directory name)
- *   --runtime=<runtime>   e.g. node-22-lts, go-1.23, python-3.12
+ *   --runtime=<runtime>   e.g. node-24-lts, go-1.23, python-3.12
  *   --mode=lite|rigor     Specification depth (default: lite)
  *   --ast=<adapter>       ast-grep | graphify | ripgrep | lsp (default: ast-grep)
  *   --concurrency=, --hardware=, --workload=   Discovery answers
@@ -36,7 +36,7 @@ function getArgValue(name, defaultValue) {
 }
 
 const DEFAULTS = {
-    runtime: 'node-22-lts',
+    runtime: 'node-24-lts',
     concurrency: '1-10 internal',
     hardware: '$5 VPS',
     workload: 'I/O-heavy API'
@@ -80,7 +80,7 @@ async function runGuidedMode() {
 
     console.log('\n--- Step 2: Project Definition ---');
     const projectName = await ask('Project Name', path.basename(target));
-    const runtime = await ask('Primary Runtime / Stack (e.g. node-22-lts, go-1.23, python-3.12)', DEFAULTS.runtime);
+    const runtime = await ask('Primary Runtime / Stack (e.g. node-24-lts, go-1.23, python-3.12)', DEFAULTS.runtime);
 
     console.log('\n--- Step 3: 4-Pillar Discovery Interview (recorded in ADR-0001) ---');
     const concurrency = await ask('1. Expected peak concurrency (e.g. 1-10 internal, 100-1,000, 50k+ public)', DEFAULTS.concurrency);

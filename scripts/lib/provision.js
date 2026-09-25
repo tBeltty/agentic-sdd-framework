@@ -108,7 +108,7 @@ function fillContext(text, answers, config) {
     const pairs = [
         ['[Project Name]', answers.projectName],
         ['Lite | Rigor', answers.specMode === 'lite' ? 'Lite' : 'Rigor'],
-        ['[e.g. Node.js 22 LTS, Go 1.23, Python 3.12]', answers.runtime],
+        ['[e.g. Node.js 24 LTS, Go 1.23, Python 3.12]', answers.runtime],
         ['Clean Architecture | Standard MVC | Modular Monolith', config.architecture.style],
         ['No-AI-Slop Linter: [Enabled / Disabled]', `No-AI-Slop Linter: ${onOff(config.capabilities.noAiSlop.enabled !== false)}`],
         ['[graphify / ast-grep / ripgrep / lsp]', answers.astAdapter],
