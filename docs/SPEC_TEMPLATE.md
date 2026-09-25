@@ -5,6 +5,8 @@
 **Author:** [Author Name]  
 **Target Completion:** [Date]  
 
+> The quality gate enforces this document: a checked task needs pasted evidence; `In Progress` and `Completed` need a real verification command and expected output; `Completed` needs every task checked and a passing `Last Verified` entry recorded by `sdd-verify --record`.
+
 ---
 
 ## 1. Context and Problem Statement
@@ -32,23 +34,26 @@ List every component, file, and interface impacted by this specification.
 
 ## 3. Implementation Tasks
 
-List atomic, sequential tasks. Each task must name target files and concrete actions.
+List atomic, sequential tasks. Each task must name target files and concrete actions. Check a task only after pasting the command you ran and its literal output under **Evidence**.
 
 * [ ] **T1:** [Action description]
   * **Files:** `path/to/fileA.ext`
   * **Details:** Specific functions, types, or configuration keys to add or modify.
+  * **Evidence:** [command run and its literal output]
 * [ ] **T2:** [Action description]
   * **Files:** `path/to/fileB.ext`
   * **Details:** Integration and orchestration logic.
+  * **Evidence:** [command run and its literal output]
 * [ ] **T3:** [Action description]
   * **Files:** `path/to/tests/feature.test.ext`
   * **Details:** Unit and integration test coverage.
+  * **Evidence:** [command run and its literal output]
 
 ---
 
 ## 4. Verification Gate
 
-The specification is not complete until this command exits with code 0 and returns expected output.
+The specification is not complete until this command exits with code 0 and returns expected output. `sdd-verify` runs it and checks that every non-empty line of the expected output appears in the actual output (a line wrapped in `/slashes/` is a regular expression).
 
 * **Verification Command:**
   ```bash
@@ -59,6 +64,7 @@ The specification is not complete until this command exits with code 0 and retur
   [exact pattern or output line confirming success]
   ```
 * **Manual Verification (If applicable):** Specific manual steps to observe expected behavior.
+* **Last Verified:** [recorded by sdd-verify --record]
 
 ---
 

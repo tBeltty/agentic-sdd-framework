@@ -1,6 +1,6 @@
 {
   "name": "agentic-sdd-framework",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "The Universal Open-Source Operating System for Spec-Driven Development with AI Agents",
   "main": "scripts/sdd-init.js",
   "bin": {
@@ -20,10 +20,12 @@
   "scripts": {
     "test": "node --test",
     "init": "node scripts/sdd-init.js",
+    "verify": "node scripts/sdd-verify.js",
     "check:prereqs": "node scripts/check-system-prerequisites.js",
     "check:secrets": "node scripts/verify-no-secrets.js",
     "check:slop": "node scripts/check-copy-slop.js",
     "check:size": "node scripts/check-file-size.js",
+    "check:spec": "node scripts/check-spec.js",
     "check:versions": "node scripts/check-versions.js",
     "install-hooks": "node scripts/install-git-hooks.js",
     "quality-gate": "node scripts/quality-gate.js"

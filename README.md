@@ -41,21 +41,22 @@ graph TD
     C --> C1[Single File: docs/SPEC.md]
     C1 --> C2[Simple Verifiable Gate]
     B -->|Multi-Agent / Enterprise System| D[Rigor Mode]
-    D --> D1[The Quartet: Plan, Guide, Log, Annex]
+    D --> D1[Plan, Execution Guide, Compliance Log, Annexes]
     D1 --> D2[Negative Control Gates]
 ```
 
 ### 1. 🟢 Lite Mode (Default, Solo Developers)
 * **Single Entry Point:** Everything lives in `docs/SPEC.md` (Context, Architecture, Atomic Tasks, and Gate).
-* **Verifiable Gate:** Requires a passing terminal command and expected output before closing.
+* **Verifiable Gate:** Requires a passing terminal command and expected output before closing. `sdd-verify` runs it and records the result; the quality gate rejects checked tasks without evidence and a `Completed` spec without a recorded PASS.
 * **Best For:** Solo developers, utilities, early-stage MVPs.
 
 ### 2. 🔴 Rigor Mode (Opt-In, Multi-Agent Teams)
-* **The 4-Document Quartet:**
-  * `PLAN_OF_RECORD.md`: The "What" and "Why" (Phases and trade-offs).
-  * `EXECUTION_GUIDE.md`: The "How" (Numbered tasks `P<phase>-T<n>` and gates `P<phase>-G<n>`).
-  * `COMPLIANCE_LOG.md`: The verifiable ledger of terminal evidence.
-  * `REMEDIATION_ORDER.md`: Formal self-contained annexes (`ANNEX_A..Z`) for defect resolution.
+* **The Auditor-Executor document set** in `docs/roadmap/`, in the format of [auditor-executor-protocol](https://github.com/tBeltty/auditor-executor-protocol):
+  * `plan-of-record.md`: The "What" and "Why" (Phases and trade-offs).
+  * `execution-guide.md`: The "How" (Numbered tasks `P<phase>-T<n>` and gates `P<phase>-G<n>`).
+  * `compliance-log.md`: The verifiable ledger of terminal evidence.
+  * `annexes/`: Self-contained remediation orders issued after a verdict that is not a clean `APPROVED`.
+* **Mechanical Checks:** the quality gate runs `auditkit lint`, which rejects task IDs missing from the log, gates without a negative control, and `DONE` reports without pasted verify output. Install it with `pipx install git+https://github.com/tBeltty/auditor-executor-protocol`.
 * **Negative Controls:** Critical security and boundary gates require demonstrating the test fails without the fix and passes when restored.
 * **Best For:** Multi-agent swarms, asynchronous handoffs, and regulated domains.
 
@@ -113,7 +114,7 @@ Rerunning the wizard is safe. Existing documents are kept, `sdd.config.json` is 
 | `.claude/skills/` | Symlinks to `.agents/skills/` so Claude Code loads each skill on demand |
 | `.agents/AGENTS.md` | Constitution: 8 non-negotiable rules, each with a "Why this rule exists" field |
 | `.agents/CONTEXT.md` | Project facts, incident registry, technical debt, and non-goals |
-| `docs/SPEC.md` (Lite) or `docs/roadmap/*.md` (Rigor) | Active specification documents |
+| `docs/SPEC.md` (Lite) or `docs/roadmap/` (Rigor) | Active specification documents, checked by the quality gate |
 | `docs/decisions/ADR-0001-stack-and-architecture.md` | Stack decision record seeded with the discovery answers |
 | `sdd.config.json` | Capability manifest read by the quality gate |
 | `.sdd/scripts/` | Quality gate tooling (install mode only) |
@@ -130,7 +131,19 @@ Rerunning the wizard is safe. Existing documents are kept, `sdd.config.json` is 
 | Secret leak scanner | `verify-no-secrets.js` | Add `sdd-allow-secret` to a line to accept a known false positive |
 | No-AI-Slop copy linter | `check-copy-slop.js` | `capabilities.noAiSlop.enabled`, `.exclude`, `.maxEmDashes` |
 | File size limit | `check-file-size.js` | `architecture.maxLocPerFile` (0 disables), `architecture.maxLocExclude` |
+| Specification check | `check-spec.js` | `specification.mode`, `.specFile` (default `docs/SPEC.md`), `.roadmapDir` (default `docs/roadmap`) |
 | Version sync | `check-versions.js` | Applies only when `project.type` is `framework` |
+
+### What the Specification Check Enforces
+
+| Mode | Rule |
+| :--- | :--- |
+| Lite, any status | The `Verification Gate` section exists; every checked task has pasted **Evidence** |
+| Lite, `In Progress` | The verification command and expected output are filled in, not template placeholders |
+| Lite, `Completed` | Every task is checked and `Last Verified` records a PASS |
+| Rigor | `auditkit lint docs/roadmap` exits 0 |
+
+`node scripts/sdd-verify.js --record` (`.sdd/scripts/` in installed projects) runs the spec's verification command, checks that every expected line appears in the output (`/.../` lines are regular expressions), and writes `Last Verified: <date> PASS|FAIL (commit <sha>, exit <code>)` into the spec. The gate never runs the spec's command itself; it only checks the recorded result.
 
 `check-system-prerequisites.js` (Git identity, `gh` authentication, SSH keys) runs once inside the wizard and is available as `npm run check:prereqs`. It is not part of the gate because it depends on the local machine, not on the code.
 
@@ -153,7 +166,7 @@ agentic-sdd-framework/
 ├── docs/
 │   ├── SPEC_TEMPLATE.md           # Lite Mode template
 │   ├── decisions/ADR_TEMPLATE.md  # Architecture Decision Record template
-│   ├── roadmap/                   # Rigor Mode document templates
+│   ├── roadmap/templates/         # Rigor Mode templates (vendored from auditkit)
 │   ├── incidents/                 # Post-mortem template
 │   ├── guides/                    # Credential tiers, GitHub CLI setup
 │   └── guidelines/                # AST navigation adapter comparison
@@ -164,10 +177,13 @@ agentic-sdd-framework/
 │   ├── verify-no-secrets.js       # Credential scanner
 │   ├── check-copy-slop.js         # No-AI-Slop linter
 │   ├── check-file-size.js         # maxLocPerFile enforcement
+│   ├── check-spec.js              # Specification evidence check
+│   ├── sdd-verify.js              # Runs and records the spec's verification gate
 │   ├── check-versions.js          # Framework version sync
 │   ├── check-system-prerequisites.js # Day-0 Git, gh CLI, and SSH checks
 │   ├── install-git-hooks.js       # pre-push hook installer
-│   └── lib/                       # Shared helpers and provisioning logic
+│   ├── lib/                       # Shared helpers, spec parser, provisioning logic
+│   └── dev/sync-vendored.js       # Syncs and checks files vendored from auditor-executor-protocol
 │
 ├── test/                          # node:test suites (npm test)
 └── sdd.config.json                # Capability manifest of this repository

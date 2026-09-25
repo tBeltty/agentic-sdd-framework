@@ -16,6 +16,7 @@ const CHECKS = [
     { title: '🔒 Secret Leak Scanner', module: require('./verify-no-secrets') },
     { title: '✍️  No-AI-Slop Copy Linter', module: require('./check-copy-slop') },
     { title: '📏 File Size Limit', module: require('./check-file-size') },
+    { title: '📋 Specification Check', module: require('./check-spec') },
     { title: '🏷️  Version Sync Check', module: require('./check-versions') }
 ];
 

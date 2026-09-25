@@ -30,6 +30,9 @@ test('install mode provisions an existing project from another working directory
         assert.ok(exists(project, rel), `${rel} should exist`);
     }
     assert.match(read(project, 'AGENTS.md'), /node \.sdd\/scripts\/quality-gate\.js/);
+    assert.match(read(project, 'AGENTS.md'), /node \.sdd\/scripts\/sdd-verify\.js --record/);
+    assert.ok(exists(project, '.sdd/scripts/check-spec.js'));
+    assert.ok(exists(project, 'docs/roadmap/templates/execution-guide.md'));
     assert.match(read(project, 'CLAUDE.md'), /^@\.agents\/AGENTS\.md$/m);
     assert.match(read(project, '.agents/CONTEXT.md'), /\*\*Primary Runtime:\*\* go-1\.23/);
     assert.match(read(project, 'docs/decisions/ADR-0001-stack-and-architecture.md'), /Hardware and Deployment:\*\* \$5 VPS/);
@@ -60,10 +63,13 @@ test('rerunning is idempotent and preserves user edits and custom config keys', 
     assert.deepStrictEqual(merged.custom, { keep: true });
     assert.strictEqual(merged.architecture.maxLocPerFile, 250);
     assert.strictEqual(merged.specification.mode, 'rigor');
-    for (const doc of ['PLAN_OF_RECORD', 'EXECUTION_GUIDE', 'COMPLIANCE_LOG']) {
+    for (const doc of ['plan-of-record', 'execution-guide', 'compliance-log']) {
         assert.ok(exists(project, `docs/roadmap/${doc}.md`), `${doc}.md should exist`);
     }
+    assert.ok(exists(project, 'docs/roadmap/annexes/.gitkeep'));
+    assert.match(read(project, 'docs/roadmap/execution-guide.md'), /^# app . Execution Guide/);
     assert.match(read(project, 'AGENTS.md'), /docs\/roadmap\/.*Rigor mode/);
+    assert.match(read(project, 'AGENTS.md'), /auditkit lint docs\/roadmap/);
 });
 
 test('unmanaged AGENTS.md and CLAUDE.md are never overwritten', () => {

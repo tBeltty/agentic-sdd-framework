@@ -19,11 +19,13 @@ const { BANNED_PATTERNS } = require('./lib/slop-patterns');
 
 const PROSE_EXTENSIONS = ['.md', '.mdx', '.txt'];
 
-// The skill that defines the banned patterns must quote them; vendored skills are
-// synced from their upstream repositories and linted there.
+// The skill that defines the banned patterns must quote them; vendored skills and the
+// Rigor templates are synced from their upstream repositories and linted there. Rigor
+// documents are records in the protocol's format and hold pasted command output.
 const DEFAULT_EXCLUDE = [
     '.agents/skills/no-ai-slop/',
-    '.agents/skills/auditor-executor-protocol/'
+    '.agents/skills/auditor-executor-protocol/',
+    'docs/roadmap/'
 ];
 
 function lintContent(content, { maxEmDashes = 1 } = {}) {

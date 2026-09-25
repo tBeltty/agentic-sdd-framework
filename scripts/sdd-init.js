@@ -25,7 +25,7 @@
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 const { FRAMEWORK_ROOT, provision } = require('./lib/provision');
 
 const args = process.argv.slice(2);
@@ -145,7 +145,11 @@ function bootstrap(answers) {
     if (answers.specMode === 'lite') {
         console.log('  3. Define your tasks in docs/SPEC.md and implement with verifiable gates.');
     } else {
-        console.log('  3. Write docs/roadmap/PLAN_OF_RECORD.md and coordinate with the Auditor-Executor protocol.');
+        console.log('  3. Write docs/roadmap/plan-of-record.md and coordinate with the Auditor-Executor protocol.');
+        if (spawnSync('auditkit', ['--version']).error) {
+            console.log('     Rigor mode is checked by auditkit, which is not installed. Install it with:');
+            console.log('     pipx install git+https://github.com/tBeltty/auditor-executor-protocol');
+        }
     }
     console.log(`  4. Quality gate: ${result.gateCommand}${result.hookInstalled ? ' (runs on every git push)' : ''}\n`);
 }

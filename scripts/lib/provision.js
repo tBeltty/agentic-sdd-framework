@@ -21,8 +21,8 @@ const SPEC_MODES = ['lite', 'rigor'];
 const AST_ADAPTERS = ['ast-grep', 'graphify', 'ripgrep', 'lsp'];
 const TOOL_DIR = '.sdd/scripts';
 const TOOL_FILES = [
-    'quality-gate.js', 'verify-no-secrets.js', 'check-copy-slop.js', 'check-file-size.js', 'check-versions.js',
-    'check-system-prerequisites.js', 'install-git-hooks.js', 'lib'
+    'quality-gate.js', 'verify-no-secrets.js', 'check-copy-slop.js', 'check-file-size.js', 'check-spec.js',
+    'check-versions.js', 'check-system-prerequisites.js', 'install-git-hooks.js', 'sdd-verify.js', 'lib'
 ];
 const TEMPLATES = [
     '.agents/AGENTS.template.md',
@@ -30,15 +30,15 @@ const TEMPLATES = [
     'docs/SPEC_TEMPLATE.md',
     'docs/decisions/ADR_TEMPLATE.md',
     'docs/incidents/0000-00-00-incident-template.md',
-    'docs/roadmap/PLAN_OF_RECORD_TEMPLATE.md',
-    'docs/roadmap/EXECUTION_GUIDE_TEMPLATE.md',
-    'docs/roadmap/COMPLIANCE_LOG_TEMPLATE.md',
-    'docs/roadmap/REMEDIATION_ORDER_TEMPLATE.md',
+    'docs/roadmap/templates/plan-of-record.md',
+    'docs/roadmap/templates/execution-guide.md',
+    'docs/roadmap/templates/compliance-log.md',
     'docs/guides/AGENT_CREDENTIALS.md',
     'docs/guides/GITHUB_CLI_SETUP.md',
     'docs/guidelines/AST_NAVIGATION.md'
 ];
-const RIGOR_DOCS = ['PLAN_OF_RECORD', 'EXECUTION_GUIDE', 'COMPLIANCE_LOG'];
+// Rigor documents use the auditkit format (tBeltty/auditor-executor-protocol) so `auditkit lint` can check them.
+const RIGOR_DOCS = ['plan-of-record', 'execution-guide', 'compliance-log'];
 const ICONS = { created: '✅', updated: '🔄', linked: '🔗', copied: '📄', kept: '⏭️ ', skipped: '⚠️ ', unchanged: '⏭️ ' };
 
 // String.prototype.replace would interpret "$5" in answers like "$5 VPS".
@@ -140,8 +140,13 @@ function fillAdr(text, answers, date) {
 function renderEntrypoint(answers, gateCommand) {
     const specLocation = answers.specMode === 'lite'
         ? '`docs/SPEC.md`: the active specification (Lite mode).'
-        : '`docs/roadmap/`: Plan of Record, Execution Guide, and Compliance Log (Rigor mode).';
+        : '`docs/roadmap/`: `plan-of-record.md`, `execution-guide.md`, `compliance-log.md`, and `annexes/` (Rigor mode).';
+    const toolDir = gateCommand.replace(/^node /, '').replace(/\/quality-gate\.js$/, '');
+    const specCheck = answers.specMode === 'lite'
+        ? `Close \`docs/SPEC.md\` by running \`node ${toolDir}/sdd-verify.js --record\`; the gate rejects a \`Completed\` spec without a recorded PASS.`
+        : 'The gate runs `auditkit lint docs/roadmap`; a `DONE` report without pasted verify output fails it.';
     const values = {
+        SPEC_CHECK: specCheck,
         PROJECT_NAME: answers.projectName,
         SPEC_LOCATION: specLocation,
         AST_ADAPTER: answers.astAdapter,
@@ -223,7 +228,11 @@ function provision(rawAnswers, { target = process.cwd(), force = false, log = co
     if (answers.specMode === 'lite') {
         createFromTemplate('docs/SPEC_TEMPLATE.md', 'docs/SPEC.md');
     } else {
-        for (const doc of RIGOR_DOCS) createFromTemplate(`docs/roadmap/${doc}_TEMPLATE.md`, `docs/roadmap/${doc}.md`);
+        for (const doc of RIGOR_DOCS) {
+            createFromTemplate(`docs/roadmap/templates/${doc}.md`, `docs/roadmap/${doc}.md`,
+                t => replaceLiteral(t, '{{PROJECT_NAME}}', answers.projectName));
+        }
+        if (!fs.existsSync(at('docs/roadmap/annexes/.gitkeep'))) write('docs/roadmap/annexes/.gitkeep', '');
     }
     createFromTemplate('docs/decisions/ADR_TEMPLATE.md', 'docs/decisions/ADR-0001-stack-and-architecture.md',
         t => fillAdr(t, answers, today));

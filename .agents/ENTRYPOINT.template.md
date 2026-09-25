@@ -26,4 +26,6 @@ Load a skill from `.agents/skills/<name>/SKILL.md` only when its trigger applies
 
 ## Before Every Push
 
-Run `{{GATE_COMMAND}}`. It must exit 0. The pre-push hook runs it automatically.
+Run `{{GATE_COMMAND}}`. It must exit 0. The pre-push hook runs it automatically, and it checks the specification as well as the code: a checked task or `DONE` report without pasted evidence fails.
+
+{{SPEC_CHECK}}
