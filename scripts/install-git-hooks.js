@@ -2,44 +2,72 @@
 
 /**
  * scripts/install-git-hooks.js
- * 
- * Local Pre-Push Quality Gate Hook Installer
- * Automatically configures .git/hooks/pre-push to run the Quality Gate
- * before any branch push can be sent to GitHub.
+ *
+ * Installs a pre-push hook that runs the quality gate before any push.
+ * The hooks directory is resolved with `git rev-parse --git-path hooks`, so linked
+ * worktrees and core.hooksPath are supported. An existing unmanaged pre-push hook is
+ * preserved as pre-push.local and runs first.
  */
 
 const fs = require('fs');
 const path = require('path');
+const { git, repoRoot } = require('./lib/git');
 
-const gitHooksDir = path.join(__dirname, '..', '.git', 'hooks');
-const prePushHookPath = path.join(gitHooksDir, 'pre-push');
+const MARKER = 'sdd:managed';
 
-if (!fs.existsSync(gitHooksDir)) {
-    console.error('❌ .git/hooks directory not found. Is this a git repository?');
-    process.exit(1);
-}
-
-const hookScript = `#!/usr/bin/env bash
-# Pre-push hook: Agentic SDD Quality Gate
-echo "========================================================"
-echo "  🚀 Running Pre-Push Quality Gate Verification..."
-echo "========================================================"
-
-npm run quality-gate
-EXIT_CODE=$?
-
-if [ $EXIT_CODE -ne 0 ]; then
-    echo ""
-    echo "❌ Quality Gate failed! Push aborted."
-    echo "Fix all errors reported above before pushing to remote."
-    exit 1
+function renderHook(gateScript) {
+    return `#!/bin/sh
+# ${MARKER} pre-push hook installed by the Agentic SDD Framework.
+# A pre-existing hook, if any, was moved to pre-push.local and runs first.
+HOOK_DIR=$(dirname "$0")
+if [ -x "$HOOK_DIR/pre-push.local" ]; then
+    INPUT=$(cat)
+    printf '%s\\n' "$INPUT" | "$HOOK_DIR/pre-push.local" "$@" || exit 1
 fi
 
-echo ""
-echo "✅ Quality Gate passed! Proceeding with push."
-exit 0
+if ! node "${gateScript}"; then
+    echo "Quality gate failed. Push aborted." >&2
+    exit 1
+fi
 `;
+}
 
-fs.writeFileSync(prePushHookPath, hookScript, { mode: 0o755 });
-console.log('✅ Pre-push Quality Gate hook successfully installed in .git/hooks/pre-push\n');
-process.exit(0);
+function install({ root = repoRoot(), gateScript = path.join(__dirname, 'quality-gate.js') } = {}) {
+    let hooksDir;
+    try {
+        hooksDir = path.resolve(root, git(['rev-parse', '--git-path', 'hooks'], root).trim());
+    } catch {
+        throw new Error(`${root} is not a git repository.`);
+    }
+    fs.mkdirSync(hooksDir, { recursive: true });
+
+    const hookPath = path.join(hooksDir, 'pre-push');
+    const localPath = path.join(hooksDir, 'pre-push.local');
+    let preserved = false;
+    if (fs.existsSync(hookPath) && !fs.readFileSync(hookPath, 'utf8').includes(MARKER)) {
+        if (fs.existsSync(localPath)) {
+            throw new Error(`Both ${hookPath} and pre-push.local exist. Merge them manually, then rerun.`);
+        }
+        fs.renameSync(hookPath, localPath);
+        preserved = true;
+    }
+
+    // Git runs hooks from the worktree root, so a root-relative path works in every worktree.
+    const relativeGate = path.relative(root, gateScript).split(path.sep).join('/');
+    fs.writeFileSync(hookPath, renderHook(relativeGate), { mode: 0o755 });
+    fs.chmodSync(hookPath, 0o755);
+    return { hookPath, preserved };
+}
+
+if (require.main === module) {
+    try {
+        const { hookPath, preserved } = install();
+        if (preserved) console.log('ℹ️  Existing pre-push hook preserved as pre-push.local (runs first).');
+        console.log(`✅ Pre-push quality gate hook installed at ${hookPath}\n`);
+    } catch (error) {
+        console.error(`❌ ${error.message}`);
+        process.exit(1);
+    }
+}
+
+module.exports = { MARKER, install };
