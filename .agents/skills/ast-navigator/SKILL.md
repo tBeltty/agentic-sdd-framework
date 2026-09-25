@@ -21,14 +21,9 @@ Enable AI coding agents to navigate complex codebases by querying Abstract Synta
 
 ---
 
-## 🔌 Supported Adapters
+## 🔌 Active Adapter
 
-The active adapter is declared in `sdd.config.json` under `capabilities.astNavigation.adapter`. Refer to individual adapter guides in `adapters/`:
-
-* **`graphify`:** Visual and relational knowledge graph by Graphify Labs. Ideal for token conservation in large monorepos with Python runtime available.
-* **`ast-grep`:** Native binary Treesitter structural search. Zero Python dependency, fast structural pattern matching.
-* **`ripgrep`:** High-speed regex text search. Universal baseline present in all developer environments.
-* **`lsp`:** Language Server Protocol and SCIP indexing for typed codebases (TypeScript, Go, Rust, Java).
+Read `capabilities.astNavigation.adapter` in `sdd.config.json`, then load only `adapters/<adapter>.md` for its commands. Available adapters: `ast-grep`, `graphify`, `ripgrep`, `lsp`. The comparison used to choose one lives in `docs/guidelines/AST_NAVIGATION.md`.
 
 ---
 

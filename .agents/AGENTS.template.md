@@ -33,7 +33,7 @@ This document establishes the non-negotiable operating rules for AI coding agent
 ---
 
 ## 5. Zero-Trust Secrets Management
-* **Rule:** Agents must never request API keys or credentials in chat prompts. Secrets must be read directly from the Tier 3 Vault (`~/secrets/<app>/.vault`) or environment variables. Never commit secrets to Git.
+* **Rule:** Agents must never request API keys or credentials in chat prompts. Secrets must be read directly from the Tier 3 Vault (`~/secrets/<app>/.vault`) or environment variables. Never commit secrets to Git. Tier model: `docs/guides/AGENT_CREDENTIALS.md`.
 * **Why this rule exists:**
   > [Document the incident or rationale here. For example: Chat logs and git histories are permanently recorded; leaking credentials requires immediate key revocation.]
 
@@ -47,7 +47,7 @@ This document establishes the non-negotiable operating rules for AI coding agent
 ---
 
 ## 7. Factual Technical Copy (No AI Slop)
-* **Rule:** All documentation, user-facing copy, and commit messages must be factual, concise, and dense. Banned: empty buzzwords, binary contrast structures, throat-clearing openers, colon reveals, and em-dash rhythm crutches.
+* **Rule:** All documentation, user-facing copy, and commit messages must be factual, concise, and dense, following the `no-ai-slop` skill. The quality gate enforces its banned patterns.
 * **Why this rule exists:**
   > [Document the incident or rationale here. For example: Promotional puffery and marketing contrasts obscure technical reality and degrade documentation clarity.]
 

@@ -33,7 +33,10 @@ const TEMPLATES = [
     'docs/roadmap/PLAN_OF_RECORD_TEMPLATE.md',
     'docs/roadmap/EXECUTION_GUIDE_TEMPLATE.md',
     'docs/roadmap/COMPLIANCE_LOG_TEMPLATE.md',
-    'docs/roadmap/REMEDIATION_ORDER_TEMPLATE.md'
+    'docs/roadmap/REMEDIATION_ORDER_TEMPLATE.md',
+    'docs/guides/AGENT_CREDENTIALS.md',
+    'docs/guides/GITHUB_CLI_SETUP.md',
+    'docs/guidelines/AST_NAVIGATION.md'
 ];
 const RIGOR_DOCS = ['PLAN_OF_RECORD', 'EXECUTION_GUIDE', 'COMPLIANCE_LOG'];
 const ICONS = { created: '✅', updated: '🔄', linked: '🔗', copied: '📄', kept: '⏭️ ', skipped: '⚠️ ', unchanged: '⏭️ ' };
@@ -204,7 +207,7 @@ function provision(rawAnswers, { target = process.cwd(), force = false, log = co
             fs.mkdirSync(path.dirname(at(rel)), { recursive: true });
             fs.copyFileSync(path.join(FRAMEWORK_ROOT, rel), at(rel));
         }
-        record('copied', 'specification and governance templates');
+        record('copied', 'templates and guides referenced by the skills');
     }
 
     // 2. Capability manifest.
