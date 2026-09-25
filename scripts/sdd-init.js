@@ -131,12 +131,15 @@ async function runGuidedMode() {
     const askYesNo = async (query, defaultYes) =>
         (await ask(`${query} (${defaultYes ? 'Y/n' : 'y/N'})`, defaultYes ? 'y' : 'n')).toLowerCase().startsWith('y');
 
-    const installMode = fs.realpathSync(target) !== fs.realpathSync(FRAMEWORK_ROOT);
-    if (installMode && !(await askYesNo(`Install SDD governance into ${target}?`, true))) {
+    const exists = fs.existsSync(target);
+    const installMode = !exists || fs.realpathSync(target) !== fs.realpathSync(FRAMEWORK_ROOT);
+    const question = exists ? `Install SDD governance into ${target}?` : `${target} does not exist. Create it and install SDD governance?`;
+    if (installMode && !(await askYesNo(question, true))) {
         rl.close();
         console.log('Aborted. Pass --target=<dir> to choose another project.');
         return;
     }
+    fs.mkdirSync(target, { recursive: true });
 
     console.log('--- Step 1: System Prerequisites Check ---');
     try {
@@ -216,10 +219,11 @@ function bootstrap(answers) {
         console.log('     "Before any task, read .agents/AGENTS.md and .agents/CONTEXT.md."');
     }
     console.log('  2. Record the incident or rationale behind each rule in .agents/AGENTS.md.');
+    const { specification = {} } = result.config;
     if (answers.specMode === 'lite') {
-        console.log('  3. Define your tasks in docs/SPEC.md and implement with verifiable gates.');
+        console.log(`  3. Define your tasks in ${specification.specFile || 'docs/SPEC.md'} and implement with verifiable gates.`);
     } else {
-        console.log('  3. Write docs/roadmap/plan-of-record.md and coordinate with the Auditor-Executor protocol.');
+        console.log(`  3. Write ${specification.roadmapDir || 'docs/roadmap'}/plan-of-record.md and coordinate with the Auditor-Executor protocol.`);
         if (spawnSync('auditkit', ['--version']).error) {
             console.log('     Rigor mode is checked by auditkit, which is not installed. Install it with:');
             console.log('     pipx install git+https://github.com/tBeltty/auditor-executor-protocol');
@@ -234,5 +238,8 @@ if (wantsExpress) {
     console.log('ℹ️  No interactive terminal detected; using Express Mode defaults.');
     runExpressMode();
 } else {
-    runGuidedMode();
+    runGuidedMode().catch(error => {
+        console.error(`\n❌ ${error.message}\n`);
+        process.exit(1);
+    });
 }

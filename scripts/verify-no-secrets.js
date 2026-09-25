@@ -19,16 +19,6 @@ const { listFiles, readFiles, isBinary, WORKTREE } = require('./lib/git');
 const { loadConfig, getIn } = require('./lib/config');
 const { runCheckCli } = require('./lib/cli');
 
-// Shannon entropy in bits per character.
-function entropy(value) {
-    const counts = {};
-    for (const ch of value) counts[ch] = (counts[ch] || 0) + 1;
-    return Object.values(counts).reduce((sum, n) => {
-        const p = n / value.length;
-        return sum - p * Math.log2(p);
-    }, 0);
-}
-
 // Ordered from most to least specific; every match of every pattern on a line is checked,
 // so a placeholder earlier on the line cannot hide a real key later on it.
 const SECRET_PATTERNS = [
@@ -52,12 +42,14 @@ const SECRET_PATTERNS = [
     }
 ];
 
-// Keys whose value is a secret: ends in secret, token, password, pwd, api key, private or
-// access key, or credential(s). `max_tokens` or `tokenizer` do not match.
-const SECRET_KEY_RE = /(?:^|[^A-Za-z0-9_])([A-Za-z0-9_.-]*?(?:secret|token|passw(?:or)?d|pwd|api[_-]?key|private[_-]?key|access[_-]?key|credentials?))["']?\s*[:=]\s*(.*)$/i;
+// Keys whose value is a secret: ends in secret, token, password, pwd, credential(s), or an
+// api, private, access, secret, signing, encryption or master key. `max_tokens`,
+// `tokenizer` or `cache_key` do not match.
+const SECRET_KEY_RE = /(?:^|[^A-Za-z0-9_])([A-Za-z0-9_.-]*?(?:secret|token|passw(?:or)?d|pwd|credentials?|(?:api|private|access|secret|signing|encryption|master)[_-]?key))["']?\s*[:=]\s*(.*)$/i;
 const PASSWORD_KEY_RE = /passw(?:or)?d|pwd|secret|credential/i;
-// Files where an unquoted value is a literal (KEY=value), not a code expression.
-const CONFIG_FILE_RE = /(^|\/)\.env(\.[^/]*)?$|\.(env|ini|cfg|conf|properties|toml|ya?ml|json)$/i;
+// Files where an unquoted value is a literal (KEY=value), not a code expression: env and
+// config files, package manager rc files, shell scripts, and Dockerfiles.
+const CONFIG_FILE_RE = /(^|\/)(\.env[^/]*|\.npmrc|\.pypirc|\.yarnrc(\.yml)?|Dockerfile[^/]*|Containerfile)$|\.(env|ini|cfg|conf|properties|toml|ya?ml|json|sh|bash|zsh|ps1|tfvars|dockerfile)$/i;
 
 // Shannon entropy in bits per character.
 function entropy(value) {
@@ -86,7 +78,9 @@ const isPlaceholder = value => SAFE_PLACEHOLDERS.some(p => value.toLowerCase().i
 // The literal assigned to a secret-named key, if any. In code, only quoted values are
 // literals (an unquoted value is an expression such as a call or a variable); in config
 // files, an unquoted value is a literal too.
-function secretAssignment(line, { configFile }) {
+function secretAssignment(rawLine, { configFile }) {
+    // Dockerfile legacy form `ENV KEY value` is `ENV KEY=value`.
+    const line = configFile ? rawLine.replace(/^(\s*(?:ENV|ARG)\s+)([A-Za-z_][A-Za-z0-9_]*)\s+(?=\S)/i, '$1$2=') : rawLine;
     const match = line.match(SECRET_KEY_RE);
     if (!match) return null;
     const [, key, rest] = match;

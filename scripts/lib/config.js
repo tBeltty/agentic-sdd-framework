@@ -12,6 +12,8 @@ const { readFile, WORKTREE } = require('./git');
 
 const SCHEMA = require('./sdd.config.schema.json');
 
+const canonical = value => value.replace(/\\/g, '/').split('/').filter(s => s && s !== '.').join('/');
+
 function typeOf(value) {
     if (Array.isArray(value)) return 'array';
     if (value === null) return 'null';
@@ -39,10 +41,16 @@ function validate(value, schema, at, errors) {
     if (typeof schema.minimum === 'number' && typeof value === 'number' && value < schema.minimum) {
         errors.push(`${at}: must be >= ${schema.minimum}`);
     }
-    if (schema['x-relative-path'] && typeof value === 'string') {
-        const segments = value.split(/[\\/]/);
+    if (schema['x-relative-path'] && typeof value === 'string' && value !== '') {
+        // Paths are compared as written with Git's paths, so only the canonical form works:
+        // forward slashes, no ".", "..", or empty segments (a trailing "/" marks a directory).
+        const segments = value.replace(/\/$/, '').split('/');
         if (path.isAbsolute(value) || /^[A-Za-z]:/.test(value) || segments.includes('..')) {
             errors.push(`${at}: must be a path relative to the repository root, without ".."`);
+        } else if (value.includes('\\') || segments.some(s => s === '' || s === '.')) {
+            errors.push(`${at}: write the path in canonical form (forward slashes, no "./" or "//"), e.g. "${canonical(value)}"`);
+        } else if (schema['x-file-path'] && value.endsWith('/')) {
+            errors.push(`${at}: must not end with "/"`);
         }
     }
     if (schema.items && Array.isArray(value)) {

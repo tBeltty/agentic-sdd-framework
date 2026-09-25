@@ -15,6 +15,8 @@
  */
 
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { git, readFile, WORKTREE } = require('./git');
 
 function tryGit(args, root) {
@@ -48,10 +50,28 @@ function stateOf(root, source, excludePath) {
     return fingerprintTree(root, treeOf(root, source), excludePath);
 }
 
+// Commits where a shallow clone's history is cut off. `git log -- path` reports such a
+// commit as touching every file, since it has no parent to compare with.
+function shallowBoundaries(root) {
+    const file = tryGit(['rev-parse', '--git-path', 'shallow'], root);
+    const full = file && path.resolve(root, file);
+    if (!full || !fs.existsSync(full)) return new Set();
+    return new Set(fs.readFileSync(full, 'utf8').split('\n').filter(Boolean));
+}
+
+// The last commit (from `rev`) that changed `specPath`.
+function lastSpecCommit(root, rev, specPath) {
+    const commit = tryGit(['log', '-1', '--format=%H', rev, '--', specPath], root);
+    if (commit && shallowBoundaries(root).has(commit)) {
+        throw new Error(`This is a shallow clone and the commit that completed ${specPath} is outside the fetched history. Fetch the full history (git fetch --unshallow; in GitHub Actions, actions/checkout with fetch-depth: 0).`);
+    }
+    return commit;
+}
+
 // The source whose state a spec at `specPath` must match, per the rules above.
 function referenceSourceFor(root, source, specPath) {
     if (source.kind === 'ref') {
-        const commit = tryGit(['log', '-1', '--format=%H', source.ref, '--', specPath], root);
+        const commit = lastSpecCommit(root, source.ref, specPath);
         return commit ? { kind: 'ref', ref: commit } : source;
     }
     const headHasCommit = tryGit(['rev-parse', '--verify', '--quiet', 'HEAD'], root) !== '';
@@ -64,7 +84,7 @@ function referenceSourceFor(root, source, specPath) {
         committed = null;
     }
     if (!committed || !current || !current.equals(committed)) return source;
-    const commit = tryGit(['log', '-1', '--format=%H', 'HEAD', '--', specPath], root);
+    const commit = lastSpecCommit(root, 'HEAD', specPath);
     return commit ? { kind: 'ref', ref: commit } : source;
 }
 

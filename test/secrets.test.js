@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { scanContent, sensitiveFileName, textOf, run } = require('../scripts/verify-no-secrets');
 const { tempRepo, git, writeFiles } = require('./helpers');
+const { readBlobs } = require('../scripts/lib/git');
 
 // Fixtures are assembled at runtime so this file never contains a literal key.
 const alnum = n => 'aB3dE5gH7jK9mN1pQ2rS4tU6vW8xY0zC'.repeat(4).slice(0, n);
@@ -197,4 +198,51 @@ test('N2: a staged file named like an index stage ("0:...") is read by object id
     const result = run({ root: repo, source: { kind: 'index' } });
     assert.strictEqual(result.ok, false);
     assert.match(result.report, /0:leak\.txt/);
+});
+
+test('R4: secret-named keys ending in _key, and unquoted values in shell, rc and Docker files', () => {
+    const value = 'x7Kq9ZxLm2Pw8RtYv3Nc6Bh1Jd5Gs0Ae7Ui';
+    for (const [line, file] of [
+        [`SECRET_KEY = "${value}"`, 'settings.py'],
+        [`aws_secret_key: ${value}`, 'config.yml'],
+        [`signing_key = '${value}'`, 'app.rb'],
+        [`//registry.npmjs.org/:_authToken=npm_${value}`, '.npmrc'],
+        [`export API_TOKEN=${value}`, 'deploy.sh'],
+        [`export AWS_SECRET_ACCESS_KEY=${value}`, '.envrc'],
+        [`ENV STRIPE_SECRET=${value}`, 'Dockerfile'],
+        [`ENV STRIPE_SECRET ${value}`, 'docker/api.Dockerfile']
+    ]) {
+        assert.strictEqual(found(line, file)[0]?.patternName, 'Secret Assignment', `${file}: ${line}`);
+    }
+    for (const [line, file] of [
+        ['export API_TOKEN=$(vault read -field=token secret/api)', 'deploy.sh'],
+        ['API_TOKEN="${API_TOKEN:-}"', 'run.sh'],
+        ['cache_key: user-profile-v2-abcdef123456', 'c.yml'],
+        ['primary_key = compute_primary_key(row)', 'a.py']
+    ]) {
+        assert.deepStrictEqual(found(line, file), [], `${file}: ${line}`);
+    }
+});
+
+test('R3: a symlink replaced by a regular file is scanned when staged and in pushed history', { skip: process.platform === 'win32' && 'symlinks need developer mode' }, () => {
+    const repo = tempRepo();
+    writeFiles(repo, { 'target.txt': 'x\n' });
+    fs.symlinkSync('target.txt', path.join(repo, 'config.txt'));
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-q', '-m', 'link');
+    fs.rmSync(path.join(repo, 'config.txt'));
+    writeFiles(repo, { 'config.txt': `aws = ${KEYS['AWS Access Key ID']}\n` });
+    git(repo, 'add', '-A');
+    assert.match(git(repo, 'diff', '--cached', '--name-status'), /^T\s+config\.txt/m);
+    assert.strictEqual(run({ root: repo, source: { kind: 'index' } }).ok, false);
+});
+
+test('R5: blobs are read in bounded batches, so large content never overflows the buffer', () => {
+    const repo = tempRepo();
+    const big = n => Buffer.alloc(n, String.fromCharCode(97 + (n % 26)));
+    writeFiles(repo, { 'a.bin': big(300 * 1024), 'b.bin': big(310 * 1024), 'c.bin': big(700 * 1024), 'd.txt': 'small\n' });
+    git(repo, 'add', '-A');
+    const oids = ['a.bin', 'b.bin', 'c.bin', 'd.txt'].map(f => git(repo, 'rev-parse', `:${f}`).trim());
+    const blobs = readBlobs(repo, oids, { batchBytes: 400 * 1024, maxBuffer: 512 * 1024 });
+    assert.deepStrictEqual(oids.map(o => blobs.get(o).length), [300 * 1024, 310 * 1024, 700 * 1024, 6]);
 });

@@ -21,7 +21,7 @@
 
 const fs = require('fs');
 const { git, repoRoot, describeSource } = require('./lib/git');
-const { sourceFromArgs } = require('./lib/cli');
+const { parseCheckArgs } = require('./lib/cli');
 const secrets = require('./verify-no-secrets');
 
 const CHECKS = [
@@ -81,7 +81,7 @@ function newCommits(root, { localSha, remoteSha }, remoteName) {
 // Files a commit adds or changes. `-m` makes merge commits report their changes against
 // every parent, so content introduced by the merge itself is scanned too.
 function changedFiles(root, commit) {
-    const names = git(['diff-tree', '--no-commit-id', '-r', '-m', '-z', '--name-only', '--diff-filter=ACMR', '--root', commit], root);
+    const names = git(['diff-tree', '--no-commit-id', '-r', '-m', '-z', '--name-only', '--diff-filter=ACMRT', '--root', commit], root);
     return [...new Set(names.split('\0').filter(Boolean))];
 }
 
@@ -125,14 +125,12 @@ function main(argv) {
     console.log('======================================================');
     let failed;
     try {
+        const options = parseCheckArgs(argv, { allowPush: true });
         const root = repoRoot();
-        const pushAt = argv.indexOf('--push');
-        if (pushAt !== -1) {
-            const next = argv[pushAt + 1];
-            const remoteName = next && !next.startsWith('--') ? next : '';
-            failed = runPush({ root, input: fs.readFileSync(0, 'utf8'), remoteName, log: console.log });
+        if (options.push) {
+            failed = runPush({ root, input: fs.readFileSync(0, 'utf8'), remoteName: options.remoteName, log: console.log });
         } else {
-            failed = runChecks({ root, source: sourceFromArgs(argv), log: console.log });
+            failed = runChecks({ root, source: options.source, log: console.log });
         }
     } catch (error) {
         console.error(`\n❌ ${error.message}\n`);

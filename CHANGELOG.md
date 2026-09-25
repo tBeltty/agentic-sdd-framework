@@ -23,19 +23,32 @@ for recorded evidence) again before pushing a `Completed` spec.
 - `sdd-init` reuses the answers stored in an existing `sdd.config.json` as defaults; only explicit
   flags override them. The spec and Rigor documents are created at the configured
   `specification.specFile` and `specification.roadmapDir`.
-- Rigor mode requires `auditkit` 0.3.1 or newer. CI pins the protocol repository to v0.3.1.
+- Rigor mode requires `auditkit` 0.3.2 or newer. CI pins the protocol repository to v0.3.2.
+- Check scripts reject unknown flags (a typo checked the working tree instead) and accept
+  `--ref <commit>` as well as `--ref=<commit>`.
+- Config paths must be canonical (`docs/SPEC.md`, not `./docs/SPEC.md`), and `specFile` and
+  `roadmapDir` must not end with `/`; other forms broke the spec check.
 - CI uses `actions/checkout@v7` and `actions/setup-node@v7`, which run on Node.js 24.
 
 ### Fixed
 - Files were read by path through `git show`/`cat-file`, so a name containing a newline, or a
   staged file named like `0:path`, was read wrongly or skipped. Blobs are now read by object id and
   every `cat-file` header is validated.
-- A secret introduced only by a merge commit was not scanned in push mode.
+- A secret introduced only by a merge commit, or in a file that replaced a symlink, was not
+  scanned in push mode or with `--staged`.
+- Reading more than 256 MB of tracked content from a commit or the index failed with ENOBUFS;
+  blobs are now read in bounded batches.
+- In a shallow clone, a Completed spec failed with a misleading state mismatch; the check now
+  explains that the full history is needed.
 - The secret scanner reported expressions assigned to secret-named keys (`password = getPassword()`)
-  and missed unquoted values in config files; one placeholder on a line hid a real key later on the
+  and missed unquoted values in config, rc, shell, and Docker files and keys such as `SECRET_KEY`; one placeholder on a line hid a real key later on the
   same line; a NUL byte or UTF-16 encoding hid a file from the scan.
 - The specification parser read `Status` lines and tasks inside code fences and HTML comments,
-  accepted several `Status` lines, and ignored tasks inside blockquotes. Evidence containing
+  accepted several `Status` lines, and ignored tasks inside blockquotes. A `<!--` inside inline
+  code hid every task up to the next `-->`, and a verification command inside an HTML comment
+  was run and recorded instead of the visible one. Only a line starting with `<!--` opens a
+  comment now, the gate is read from rendered lines, and a comment that holds tasks, Status, gate
+  fields, or code fences fails the check. Evidence containing
   backtick fences could end the recorded block early.
 - On timeout, `sdd-verify` killed only the shell; background processes started by the command kept
   running. The whole process tree is now killed, and output is decoded as a UTF-8 stream.
@@ -44,6 +57,8 @@ for recorded evidence) again before pushing a `Completed` spec.
 - The config validator accepted inherited object keys such as `toString`, and empty path strings.
 - The prose linter skipped all of `docs/roadmap/` even when `roadmapDir` pointed elsewhere; it now
   skips the configured `roadmapDir` and the vendored templates.
+- `sdd-init` next steps named the default spec paths instead of the configured ones, and guided
+  mode crashed on a target directory that did not exist; it now offers to create it.
 - Test temporary directories are removed on exit; the hook tests run on Windows through `sh`.
 
 ## [1.3.0] - 2026-09-25

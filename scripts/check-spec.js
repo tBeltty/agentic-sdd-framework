@@ -32,7 +32,7 @@ const { parseSpec } = require('./lib/spec');
 const { stateOf, referenceSourceFor } = require('./lib/state');
 
 const AUDITKIT_INSTALL = 'pipx install git+https://github.com/tBeltty/auditor-executor-protocol';
-const MIN_AUDITKIT = [0, 3, 1];
+const MIN_AUDITKIT = [0, 3, 2];
 
 function lintLiteSpec(text, { requireRecordedEvidence = false, expectedState = null } = {}) {
     const spec = parseSpec(text);
@@ -42,6 +42,7 @@ function lintLiteSpec(text, { requireRecordedEvidence = false, expectedState = n
     const status = spec.status || 'draft';
     const shownStatus = spec.statusProblem && spec.statusProblem.startsWith('Unknown') ? 'unknown' : status;
 
+    problems.push(...spec.hiddenProblems);
     if (spec.statusProblem) problems.push(spec.statusProblem);
     if (!spec.gate) problems.push('No "Verification Gate" section. Every specification needs one.');
 

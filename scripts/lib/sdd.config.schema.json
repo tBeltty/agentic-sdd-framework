@@ -61,13 +61,15 @@
           "type": "string",
           "x-relative-path": true,
           "description": "Lite spec path (default docs/SPEC.md).",
-          "minLength": 1
+          "minLength": 1,
+          "x-file-path": true
         },
         "roadmapDir": {
           "type": "string",
           "x-relative-path": true,
           "description": "Rigor document directory (default docs/roadmap).",
-          "minLength": 1
+          "minLength": 1,
+          "x-file-path": true
         },
         "verifyTimeoutSeconds": {
           "type": "integer",

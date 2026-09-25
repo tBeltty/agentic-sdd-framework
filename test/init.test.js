@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { tempDir, tempRepo, git, writeFiles, runHook } = require('./helpers');
@@ -220,4 +220,46 @@ test('N10: the spec and Rigor documents are created at the configured paths', ()
         assert.ok(exists(rigor, `plans/${doc}`), doc);
     }
     assert.ok(!exists(rigor, 'docs/roadmap/execution-guide.md'));
+});
+
+test('R12: next steps name the configured spec and roadmap paths', () => {
+    const lite = tempRepo();
+    writeFiles(lite, { 'sdd.config.json': JSON.stringify({ specification: { specFile: 'specs/FEATURE.md' } }) });
+    assert.match(init(lite), /Define your tasks in specs\/FEATURE\.md/);
+    const rigor = tempRepo();
+    writeFiles(rigor, { 'sdd.config.json': JSON.stringify({ specification: { roadmapDir: 'plan' } }) });
+    assert.match(init(rigor, '--mode=rigor'), /Write plan\/plan-of-record\.md/);
+});
+
+// Guided mode needs a terminal: a Python pty runs sdd-init and answers the first prompt.
+const PTY_DRIVER = `
+import os, pty, sys
+pid, fd = pty.fork()
+if pid == 0:
+    os.execv(sys.argv[1], sys.argv[1:])
+out, answered = b"", False
+while True:
+    try:
+        data = os.read(fd, 1024)
+    except OSError:
+        break
+    if not data:
+        break
+    out += data
+    if not answered and b"?" in out:
+        os.write(fd, b"n\\n")
+        answered = True
+os.waitpid(pid, 0)
+sys.stdout.write(out.decode(errors="replace"))
+`;
+const hasPty = process.platform !== 'win32' && spawnSync('python3', ['-c', 'import pty']).status === 0;
+
+test('R13: guided mode on a missing target asks to create it instead of crashing', { skip: !hasPty && 'needs python3 pty' }, () => {
+    const missing = path.join(tempDir(), 'does-not-exist');
+    const result = spawnSync('python3', ['-c', PTY_DRIVER, process.execPath, INIT, `--target=${missing}`], { encoding: 'utf8', timeout: 30000 });
+    const output = result.stdout + result.stderr;
+    assert.match(output, /does not exist\. Create it and install SDD governance\?/);
+    assert.match(output, /Aborted/);
+    assert.doesNotMatch(output, /node:fs|at Object\./);
+    assert.ok(!fs.existsSync(missing), 'declining creates nothing');
 });

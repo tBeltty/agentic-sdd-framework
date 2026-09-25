@@ -58,7 +58,7 @@ graph TD
   * `execution-guide.md`: the "how" (numbered tasks `P<phase>-T<n>` and gates `P<phase>-G<n>`).
   * `compliance-log.md`: the ledger of pasted command output and verdicts.
   * `annexes/`: self-contained remediation orders issued after a verdict that is not a clean `APPROVED`.
-* **Mechanical Checks:** the quality gate runs `auditkit lint` (0.3.1 or newer), which rejects missing or orphaned task entries, gates without a negative control, and `DONE` reports without pasted verify output.
+* **Mechanical Checks:** the quality gate runs `auditkit lint` (0.3.2 or newer), which rejects missing or orphaned task entries, gates without a negative control, and `DONE` reports without pasted verify output.
 * **Best For:** Multi-agent handoffs, asynchronous work, and regulated domains.
 
 ---
@@ -140,10 +140,10 @@ When `core.hooksPath` is set (Husky, lefthook, or a shared hooks directory), the
 | :--- | :--- |
 | *(no flag)* | Tracked files in the working tree |
 | `--staged` | The index: what the next commit contains |
-| `--ref=<commit>` | The content of that commit |
+| `--ref=<commit>` or `--ref <commit>` | The content of that commit |
 | `--push [remote]` | Pre-push mode (used by the hook): every check on the tip commit of each pushed ref, plus a secret scan of every new commit in the push (merge commits included), so a secret added and later removed is still caught. Refs whose commit is already on the remote are skipped |
 
-A check that cannot read the repository (not a Git repository, Git error, unreadable file) fails; it never reports "0 files, all clean". An invalid `sdd.config.json` (unknown key, wrong type, unknown value) fails every check with the exact problem.
+Unknown flags are errors, so a typo never falls back to checking the working tree. A check that cannot read the repository (not a Git repository, Git error, unreadable file) fails; it never reports "0 files, all clean". An invalid `sdd.config.json` (unknown key, wrong type, unknown value) fails every check with the exact problem.
 
 | Check | Script | Configuration (`sdd.config.json`) |
 | :--- | :--- | :--- |
@@ -153,13 +153,13 @@ A check that cannot read the repository (not a Git repository, Git error, unread
 | Specification check | `check-spec.js` | `specification.mode`, `.specFile`, `.roadmapDir`, `.requireRecordedEvidence` |
 | Version sync | `check-versions.js` | Applies only when `project.type` is `framework` |
 
-The secret scanner reports provider keys (Anthropic, OpenAI, Stripe, GitHub, Slack, Resend, AWS, Google), private key blocks (including PGP), credentials embedded in URLs, high-entropy values assigned to secret-named keys (`password`, `client_secret`, `access_token`, ...), and tracked secret files (`.env`, `id_rsa`, `*.key`, `*.p12`, ...). It is a regex scanner, not a replacement for a dedicated tool such as gitleaks.
+The secret scanner reports provider keys (Anthropic, OpenAI, Stripe, GitHub, Slack, Resend, AWS, Google), private key blocks (including PGP), credentials embedded in URLs, high-entropy values assigned to secret-named keys (`password`, `client_secret`, `access_token`, `SECRET_KEY`, `signing_key`, ...; unquoted values count in env, config, rc, shell, and Docker files), and tracked secret files (`.env`, `id_rsa`, `*.key`, `*.p12`, ...). It is a regex scanner, not a replacement for a dedicated tool such as gitleaks.
 
 ### What the Specification Check Enforces
 
 | Mode | Rule |
 | :--- | :--- |
-| Lite, any status | Status is `Draft`, `In Progress`, or `Completed`; the `Verification Gate` section exists; every checked task (any checkbox list item) has evidence |
+| Lite, any status | Exactly one Status line: `Draft`, `In Progress`, or `Completed`; the `Verification Gate` section exists; every checked task (any checkbox list item, blockquotes included) has evidence; no HTML comment block holds a task, Status, gate field, or code fence |
 | Lite, recorded evidence | Evidence written by `sdd-verify --task` must be unedited (the hash covers the date, exit code, and transcript) and exit 0 |
 | Lite, hand-written evidence | Accepted and counted in the report; rejected when `specification.requireRecordedEvidence` is `true` |
 | Lite, `In Progress` | The verification command and expected output are filled in, not template placeholders |
@@ -169,6 +169,8 @@ The secret scanner reports provider keys (Anthropic, OpenAI, Stripe, GitHub, Sla
 `sdd-verify --record` runs the spec's verification command, checks that every expected line appears in the output (`/.../` lines are regular expressions), fails if the command modified tracked files, and writes `Last Verified: <date> PASS|FAIL (commit <sha>, exit <code>, state <fingerprint>, check <hash>)`. The fingerprint covers every tracked file except the spec. The check hash covers the other fields plus the verification command and expected output, so editing the result, or changing the command after recording, reopens the spec. `--record` refuses to run while there are untracked files, because they would take part in the run without being part of the recorded state; commit, ignore, or remove them first. The gate recomputes it for the commit that completed the spec (or the uncommitted state), so files changed after the verification invalidate the PASS. Later commits that do not touch the spec do not reopen it: catching regressions after a spec is closed is the job of CI and tests.
 
 Commands run in `specification.verifyShell` (default `/bin/sh` on macOS and Linux, `cmd.exe` on Windows) with a limit of `specification.verifyTimeoutSeconds` (default 900). The gate never runs a command from the spec itself; it only checks recorded results. On timeout the whole process tree is killed, including background processes the command started.
+
+The check finds the commit that completed the spec in the Git history, so CI needs the full history: in GitHub Actions, use `actions/checkout` with `fetch-depth: 0`. In a shallow clone the check fails and says so.
 
 The hashes are integrity checks, not signatures: they catch hand edits and stale records, but anyone who can run `sdd-verify` can also write a matching record. For an authoritative result, have CI run `sdd-verify` again. Recorded evidence also cannot prove a verification command is meaningful; that remains the reviewer's call.
 

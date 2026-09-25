@@ -6,8 +6,12 @@
  *
  * Any checkbox list item is a task (bullets or numbered, also inside blockquotes); its ID
  * is the bold `**T1:**` prefix when present, otherwise "line N". Content inside fenced code
- * blocks and HTML comments is ignored, as it is when the Markdown is rendered. Line endings
- * are normalized before parsing and preserved when writing.
+ * blocks and HTML comment blocks (a line starting with `<!--`, up to the line with `-->`) is
+ * ignored, as it is when the Markdown is rendered. A `<!--` later in a line (inline code,
+ * prose) starts nothing. Because renderers differ on edge cases, a comment block that holds
+ * spec structure (a task, Status, a gate field, or a code fence) is reported as a problem
+ * instead of being silently skipped. Line endings are normalized before parsing and
+ * preserved when writing.
  *
  * Records written by sdd-verify carry integrity hashes: task evidence covers its date, exit
  * code and transcript; "Last Verified" covers every field plus the verification command and
@@ -38,30 +42,42 @@ const indentOf = line => line.match(/^\s*/)[0].length;
 const shortHash = text => crypto.createHash('sha256').update(text).digest('hex').slice(0, 16);
 const stripQuote = line => line.replace(/^(\s*>\s?)+/, '');
 
-// Lines that render as content: blank out fenced code and HTML comments (keeping line numbers).
-function visibleLines(lines) {
+// Spec structure that must never sit inside an HTML comment.
+const STRUCTURE_RE = /\[( |x|X)\]|\*\*(?:Status|Verification Command|Expected Output|Last Verified|Evidence):\*\*|`{3,}|~{3,}/i;
+
+// Marks the lines of HTML comment blocks: a line whose content starts with `<!--` (outside
+// fenced code) opens one, and the first line containing `-->` after it closes it.
+function commentLines(lines) {
     const fence = createFenceTracker();
     let inComment = false;
     return lines.map(line => {
-        if (!inComment && (fence.update(line) || fence.inside)) return '';
-        let out = '';
-        let rest = line;
-        while (rest.length > 0) {
-            if (inComment) {
-                const end = rest.indexOf('-->');
-                if (end === -1) return out;
-                inComment = false;
-                rest = rest.slice(end + 3);
-            } else {
-                const start = rest.indexOf('<!--');
-                if (start === -1) return out + rest;
-                out += rest.slice(0, start);
-                inComment = true;
-                rest = rest.slice(start + 4);
-            }
+        if (inComment) {
+            if (line.includes('-->')) inComment = false;
+            return true;
         }
-        return out;
+        if (fence.update(line) || fence.inside) return false;
+        const content = stripQuote(line).trimStart();
+        if (!content.startsWith('<!--')) return false;
+        inComment = !content.slice(4).includes('-->');
+        return true;
     });
+}
+
+// Blanks HTML comment blocks (keeping line numbers).
+const uncommented = (lines, hidden) => lines.map((line, i) => (hidden[i] ? '' : line));
+
+// Lines that render as content: also blanks fenced code.
+function visibleLines(lines, hidden = commentLines(lines)) {
+    const fence = createFenceTracker();
+    return uncommented(lines, hidden).map(line => (fence.update(line) || fence.inside ? '' : line));
+}
+
+// Problems for comment blocks that hold spec structure, which renderers may or may not show.
+function hiddenStructure(lines, hidden) {
+    return lines
+        .map((line, i) => (hidden[i] && STRUCTURE_RE.test(line) ? i : -1))
+        .filter(i => i !== -1)
+        .map(i => `Line ${i + 1}: an HTML comment holds spec structure (a task, Status, gate field, or code fence). Move it out of the comment or delete it.`);
 }
 
 // Integrity hash of task evidence: date, exit code and transcript together.
@@ -130,8 +146,9 @@ function parseEvidence(lines, fieldIndex, end) {
 function parseTasks(rawLines) {
     const tasks = [];
     // Task detection runs on rendered content, with blockquote markers removed.
-    const lines = visibleLines(rawLines).map(stripQuote);
-    const unquoted = rawLines.map(stripQuote);
+    const hidden = commentLines(rawLines);
+    const lines = visibleLines(rawLines, hidden).map(stripQuote);
+    const unquoted = uncommented(rawLines, hidden).map(stripQuote);
     for (let i = 0; i < lines.length; i++) {
         const match = lines[i].match(TASK_RE);
         if (!match) continue;
@@ -187,16 +204,19 @@ function formatLastVerified(fields, command, expected) {
 function parseSpec(rawText) {
     const text = normalizeEol(rawText);
     const lines = text.split('\n');
-    const visible = visibleLines(lines);
+    const hidden = commentLines(lines);
+    const visible = visibleLines(lines, hidden);
+    // The gate is read from rendered lines: a fence inside a comment is never the command.
+    const shown = uncommented(lines, hidden);
     const bounds = gateBounds(visible);
     let gate = null;
     if (bounds) {
         const [from, to] = bounds;
-        const labelAt = label => lines.findIndex((l, i) => i >= from && i < to && label.test(l));
+        const labelAt = label => visible.findIndex((l, i) => i >= from && i < to && label.test(l));
         const commandAt = labelAt(/\*\*Verification Command:\*\*/i);
         const expectedAt = labelAt(/\*\*Expected Output:\*\*/i);
-        const command = commandAt === -1 ? null : firstFence(lines, commandAt + 1, to);
-        const expected = expectedAt === -1 ? null : firstFence(lines, expectedAt + 1, to);
+        const command = commandAt === -1 ? null : firstFence(shown, commandAt + 1, to);
+        const expected = expectedAt === -1 ? null : firstFence(shown, expectedAt + 1, to);
         const lastIndex = visible.findIndex((l, i) => i >= from && i < to && LAST_VERIFIED_RE.test(l));
         const lastValue = lastIndex === -1 ? '' : lines[lastIndex].match(LAST_VERIFIED_RE)[1].trim();
         gate = {
@@ -211,7 +231,7 @@ function parseSpec(rawText) {
         }
     }
     const { status, problem } = parseStatus(visible);
-    return { status, statusProblem: problem, tasks: parseTasks(lines), gate };
+    return { status, statusProblem: problem, tasks: parseTasks(lines), gate, hiddenProblems: hiddenStructure(lines, hidden) };
 }
 
 function withEol(original, normalizedLines) {
@@ -221,11 +241,12 @@ function withEol(original, normalizedLines) {
 // Adds or replaces the "Last Verified" bullet inside the verification gate section.
 function withLastVerified(rawText, value) {
     const lines = normalizeEol(rawText).split('\n');
-    const bounds = gateBounds(lines);
+    const visible = visibleLines(lines);
+    const bounds = gateBounds(visible);
     if (!bounds) throw new Error('No "Verification Gate" section found.');
     const [from, to] = bounds;
     const bullet = `* **Last Verified:** ${value}`;
-    const existing = lines.findIndex((l, i) => i >= from && i < to && LAST_VERIFIED_RE.test(l));
+    const existing = visible.findIndex((l, i) => i >= from && i < to && LAST_VERIFIED_RE.test(l));
     if (existing !== -1) {
         lines[existing] = bullet;
     } else {

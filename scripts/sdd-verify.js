@@ -72,7 +72,8 @@ function untrackedFiles(root) {
 
 async function verify({ root = repoRoot(), record = false, log = console.log, date } = {}) {
     const { specFile, specPath, text, runOptions } = loadLiteSpec(root);
-    const { gate } = parseSpec(text);
+    const { gate, hiddenProblems } = parseSpec(text);
+    if (hiddenProblems.length > 0) throw new Error(`${specFile}: ${hiddenProblems.join(' ')}`);
     if (!gate) throw new Error(`${specFile} has no "Verification Gate" section.`);
     if (!gate.command) throw new Error(`${specFile}: the verification command is still a placeholder.`);
     if (!gate.expected) throw new Error(`${specFile}: the expected output is still a placeholder.`);

@@ -90,7 +90,8 @@ function listFiles(root, source = WORKTREE, { changedOnly = true } = {}) {
     if (source.kind !== 'index' || !changedOnly) return paths;
     let names;
     try {
-        names = git(['diff', '--cached', '--name-only', '-z', '--diff-filter=ACMR'], root);
+        // T: a symlink or submodule replaced by a regular file is new content too.
+        names = git(['diff', '--cached', '--name-only', '-z', '--diff-filter=ACMRT'], root);
     } catch (error) {
         throw new Error(`Cannot list staged changes: ${describeGitError(error)}`);
     }
@@ -122,20 +123,58 @@ function readWorktreeFile(root, file) {
     }
 }
 
-// Reads blobs by object id in one `git cat-file --batch` process. Object ids never contain
-// newlines, so arbitrary file names cannot desynchronize the batch; every response is
-// checked against the id that was requested.
-function readBlobs(root, oids) {
-    const result = new Map();
-    const unique = [...new Set(oids)];
-    if (unique.length === 0) return result;
-    const proc = spawnSync('git', ['cat-file', '--batch'], { cwd: root, input: unique.join('\n') + '\n', maxBuffer: MAX_BUFFER });
+function catFile(root, mode, oids, maxBuffer) {
+    const proc = spawnSync('git', ['cat-file', mode], { cwd: root, input: oids.join('\n') + '\n', maxBuffer });
     if (proc.error || proc.status !== 0) {
         throw new Error(`git cat-file failed: ${proc.error ? proc.error.message : proc.stderr.toString().trim()}`);
     }
-    const out = proc.stdout;
+    return proc.stdout;
+}
+
+// Object sizes from `cat-file --batch-check`, so blobs can be read in bounded batches.
+function blobSizes(root, oids, maxBuffer) {
+    const lines = catFile(root, '--batch-check', oids, maxBuffer).toString().split('\n');
+    return oids.map((oid, i) => {
+        const [gotOid, type, size] = (lines[i] || '').split(' ');
+        if (gotOid !== oid || type !== 'blob') {
+            throw new Error(`git cat-file returned "${lines[i]}" for object ${oid}; the repository may be corrupt.`);
+        }
+        return Number(size);
+    });
+}
+
+// Reads blobs by object id with `git cat-file --batch`, in batches of about BATCH_BYTES so
+// the output always fits the buffer (a larger blob gets a batch of its own). Object ids
+// never contain newlines, so arbitrary file names cannot desynchronize the batch; every
+// response is checked against the id that was requested.
+const BATCH_BYTES = 32 * 1024 * 1024;
+
+function readBlobs(root, oids, { batchBytes = BATCH_BYTES, maxBuffer = MAX_BUFFER } = {}) {
+    const result = new Map();
+    const unique = [...new Set(oids)];
+    if (unique.length === 0) return result;
+    const sizes = blobSizes(root, unique, maxBuffer);
+    let batch = [];
+    let bytes = 0;
+    const flush = () => {
+        if (batch.length === 0) return;
+        readBatch(root, batch, Math.max(maxBuffer, bytes + 1024 * 1024), result);
+        batch = [];
+        bytes = 0;
+    };
+    unique.forEach((oid, i) => {
+        if (batch.length > 0 && bytes + sizes[i] > batchBytes) flush();
+        batch.push(oid);
+        bytes += sizes[i] + 128; // header and trailing newline
+    });
+    flush();
+    return result;
+}
+
+function readBatch(root, oids, maxBuffer, result) {
+    const out = catFile(root, '--batch', oids, maxBuffer);
     let offset = 0;
-    for (const oid of unique) {
+    for (const oid of oids) {
         const newline = out.indexOf(10, offset);
         const header = newline === -1 ? '' : out.subarray(offset, newline).toString();
         const [gotOid, type, sizeText] = header.split(' ');
@@ -147,7 +186,6 @@ function readBlobs(root, oids) {
         result.set(oid, out.subarray(offset, offset + size));
         offset += size + 1;
     }
-    return result;
 }
 
 // Map<file, Buffer|null>; null means the file does not exist in that source.
@@ -169,5 +207,5 @@ function isBinary(buffer) {
 }
 
 module.exports = {
-    WORKTREE, git, describeGitError, repoRoot, describeSource, listFiles, listTrackedFiles, readFiles, readFile, isBinary
+    WORKTREE, git, describeGitError, repoRoot, describeSource, listFiles, listTrackedFiles, readFiles, readFile, readBlobs, isBinary
 };

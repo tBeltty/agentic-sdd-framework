@@ -128,6 +128,54 @@ test('N14/N17: inherited object keys and empty paths are rejected by the config 
     assert.match(errors, /security\.allowFiles/);
 });
 
+test('R3: a file that replaced a symlink in a pushed commit is scanned', { skip: process.platform === 'win32' && 'symlinks need developer mode' }, () => {
+    const repo = pushRepo();
+    fs.symlinkSync('README.md', path.join(repo, 'config.txt'));
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-q', '-m', 'link');
+    const base = git(repo, 'rev-parse', 'HEAD').trim();
+    fs.rmSync(path.join(repo, 'config.txt'));
+    writeFiles(repo, { 'config.txt': `k=${TOKEN}\n` });
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-q', '-m', 'leak');
+    writeFiles(repo, { 'config.txt': 'k=removed\n' });
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-q', '-m', 'remove');
+    const failed = runPush({ root: repo, input: pushLine(repo, base), remoteName: 'origin', log: quiet });
+    assert.deepStrictEqual(failed, ['Secrets in pushed history [refs/heads/main]']);
+});
+
+test('R8: check scripts reject unknown flags and accept "--ref <commit>"', () => {
+    const repo = pushRepo();
+    writeFiles(repo, { 'cfg.txt': `k=${TOKEN}\n` });
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-q', '-m', 'leak');
+    writeFiles(repo, { 'cfg.txt': 'k=clean\n' });
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-q', '-m', 'clean');
+    const scanner = path.join(__dirname, '../scripts/verify-no-secrets.js');
+    const scan = args => spawnSync(process.execPath, [scanner, ...args], { cwd: repo, encoding: 'utf8' });
+    assert.strictEqual(scan(['--ref', 'HEAD~1']).status, 1, 'space form checks that commit');
+    assert.strictEqual(scan(['--ref=HEAD~1']).status, 1);
+    assert.strictEqual(scan([]).status, 0);
+    const typo = scan(['--stagd']);
+    assert.strictEqual(typo.status, 1);
+    assert.match(typo.stderr, /Unknown argument "--stagd"/);
+    assert.match(scan(['--staged', '--ref=HEAD']).stderr, /separate modes/);
+    const gate = gateCli(repo, ['--bogus']);
+    assert.strictEqual(gate.status, 1);
+    assert.match(gate.stderr, /Unknown argument "--bogus"/);
+    assert.strictEqual(gateCli(repo, ['--ref', 'HEAD~1']).status, 1);
+});
+
+test('R9: non-canonical config paths are rejected with the canonical form', () => {
+    for (const specFile of ['./docs/SPEC.md', 'docs//SPEC.md', 'docs\\SPEC.md', 'docs/./SPEC.md']) {
+        assert.match(validateConfig({ specification: { specFile } }).join(), /canonical form[\s\S]*"docs\/SPEC\.md"/, specFile);
+    }
+    assert.match(validateConfig({ specification: { roadmapDir: 'plans/' } }).join(), /must not end with "\/"/);
+    assert.deepStrictEqual(validateConfig({ specification: { specFile: 'docs/SPEC.md', roadmapDir: 'plans' }, capabilities: { noAiSlop: { exclude: ['docs/'] } } }), []);
+});
+
 test('a ref whose commit is already on the remote is not re-checked (tags on published commits)', () => {
     const repo = pushRepo();
     writeFiles(repo, { 'notes.md': 'A robust plan.\n' }); // violates the current prose rules
