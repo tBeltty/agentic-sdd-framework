@@ -24,6 +24,7 @@ for recorded evidence) again before pushing a `Completed` spec.
   flags override them. The spec and Rigor documents are created at the configured
   `specification.specFile` and `specification.roadmapDir`.
 - Rigor mode requires `auditkit` 0.3.1 or newer. CI pins the protocol repository to v0.3.1.
+- CI uses `actions/checkout@v7` and `actions/setup-node@v7`, which run on Node.js 24.
 
 ### Fixed
 - Files were read by path through `git show`/`cat-file`, so a name containing a newline, or a

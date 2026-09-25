@@ -27,10 +27,10 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js Runtime
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node-version }}
 
@@ -38,7 +38,7 @@ jobs:
         run: pipx install git+https://github.com/tBeltty/auditor-executor-protocol@${{ env.PROTOCOL_VERSION }}
 
       - name: Check out the canonical protocol repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: tBeltty/auditor-executor-protocol
           ref: ${{ env.PROTOCOL_VERSION }}
