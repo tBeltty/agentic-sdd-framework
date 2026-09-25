@@ -1,6 +1,6 @@
 {
   "name": "agentic-sdd-framework",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "The Universal Open-Source Operating System for Spec-Driven Development with AI Agents",
   "main": "scripts/sdd-init.js",
   "bin": {

@@ -14,6 +14,8 @@ const path = require('path');
 const { git, repoRoot } = require('./lib/git');
 
 const MARKER = 'sdd:managed';
+// Signature of the hook written by framework versions before the marker existed.
+const LEGACY_SIGNATURE = '# Pre-push hook: Agentic SDD Quality Gate';
 
 function renderHook(gateScript) {
     return `#!/bin/sh
@@ -44,7 +46,8 @@ function install({ root = repoRoot(), gateScript = path.join(__dirname, 'quality
     const hookPath = path.join(hooksDir, 'pre-push');
     const localPath = path.join(hooksDir, 'pre-push.local');
     let preserved = false;
-    if (fs.existsSync(hookPath) && !fs.readFileSync(hookPath, 'utf8').includes(MARKER)) {
+    const current = fs.existsSync(hookPath) ? fs.readFileSync(hookPath, 'utf8') : null;
+    if (current !== null && !current.includes(MARKER) && !current.includes(LEGACY_SIGNATURE)) {
         if (fs.existsSync(localPath)) {
             throw new Error(`Both ${hookPath} and pre-push.local exist. Merge them manually, then rerun.`);
         }

@@ -101,6 +101,16 @@ test('pre-push hook works in linked worktrees and chains an existing hook', () =
     assert.match(output, /Quality gate passed/);
 });
 
+test('a hook from an earlier framework version is replaced, not chained', () => {
+    const project = tempRepo();
+    const hookPath = path.join(project, '.git/hooks/pre-push');
+    fs.mkdirSync(path.dirname(hookPath), { recursive: true });
+    fs.writeFileSync(hookPath, '#!/usr/bin/env bash\n# Pre-push hook: Agentic SDD Quality Gate\nnpm run quality-gate\n');
+    init(project);
+    assert.match(fs.readFileSync(hookPath, 'utf8'), /sdd:managed/);
+    assert.ok(!fs.existsSync(`${hookPath}.local`));
+});
+
 test('clone mode uses templates in place and does not copy tooling', () => {
     const clone = tempRepo();
     for (const rel of ['scripts', '.agents', 'docs', 'package.json', 'sdd.config.json']) {
