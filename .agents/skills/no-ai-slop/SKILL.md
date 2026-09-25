@@ -1,6 +1,6 @@
 ---
 name: no-ai-slop
-description: "MANDATORY for user-facing copy, documentation, and agent communication. Removes common AI-generated writing clichés, binary contrasts ('it is not X, it is Y'), empty buzzwords, throat-clearing openers, colon reveals, importance puffery, and em-dash overuse. Source: https://github.com/petergyang/no-ai-slop (MIT License)."
+description: "MANDATORY for user-facing copy, documentation, and agent communication. Removes common AI-generated writing cliches, binary contrasts ('it is not X, it is Y'), empty buzzwords, throat-clearing openers, colon reveals, importance puffery, and em-dash overuse. Source: https://github.com/petergyang/no-ai-slop (MIT License)."
 ---
 
 # No AI Slop: Clear, Factual Technical Communication
@@ -47,6 +47,6 @@ Do not use decorative buzzwords that inflate importance without adding technical
 
 `scripts/check-copy-slop.js` enforces the high-precision subset of these rules on `.md`, `.mdx`, and `.txt` files, using the pattern list in `scripts/lib/slop-patterns.js`. Keep that file and this skill in sync.
 
-* **Enforced:** every banned verb, adjective, and noun above; binary contrast (English and Spanish); throat-clearing; colon reveal; faux-insight; fake-profound endings; em dashes above `capabilities.noAiSlop.maxEmDashes` per file (default 1).
+* **Enforced:** every banned verb, adjective, and noun above; binary contrast; throat-clearing; colon reveal; faux-insight; fake-profound endings; em dashes above `capabilities.noAiSlop.maxEmDashes` per file (default 1).
 * **Guidance only:** the empty adverbs (simply, actually, literally, honestly) and importance puffery. They have legitimate technical uses, so automated checks would produce false positives.
 * **Not checked:** fenced code blocks, inline code, and table rows.

@@ -3,7 +3,7 @@
 /**
  * scripts/check-copy-slop.js
  *
- * Linter for AI-generated writing clichés, buzzwords, and banned patterns in prose
+ * Linter for AI-generated writing cliches, buzzwords, and banned patterns in prose
  * (.md, .mdx, .txt). Code blocks, inline code and table rows are not checked.
  * Inspired by https://github.com/petergyang/no-ai-slop (MIT License).
  *

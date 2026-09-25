@@ -37,7 +37,7 @@ Step 3: Slice Inspection (Read only target lines, e.g. lines 40 to 80)
 | **`graphify`** | Graphify Labs | Relational graph + visual extraction | Monorepos, cross-layer dependency tracing | Requires Python 3.10+; index requires updates after edits. |
 | **`ast-grep`** | Herrington Darkholme | Tree-sitter structural syntax matching | Syntax-aware structural grep, code migrations | Requires language parser support; no whole-repo graph visualization. |
 | **`ripgrep`** | Andrew Gallant | Line-oriented SIMD regex engine | Fast text search, markdown/config inspection | Does not understand semantic code structure or imports. |
-| **`lsp / scip`** | Sourcegraph | Language Server Protocol type indexing | Enterprise TypeScript, Go, Java, Rust | Heavier initial indexing pipeline; language-specific setups. |
+| **`lsp / scip`** | SCIP Code (originally Sourcegraph) | Language Server Protocol type indexing | Enterprise TypeScript, Go, Java, Rust | Heavier initial indexing pipeline; language-specific setups. |
 
 ---
 

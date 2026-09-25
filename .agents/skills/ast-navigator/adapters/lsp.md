@@ -1,7 +1,7 @@
 # Adapter: Language Server Protocol (LSP) / SCIP
 
-* **Upstream Organization:** Sourcegraph (`@sourcegraph`)
-* **Repository:** [https://github.com/sourcegraph/scip](https://github.com/sourcegraph/scip)
+* **Upstream Organization:** SCIP Code (`@scip-code`), originally created by Sourcegraph
+* **Repository:** [https://github.com/scip-code/scip](https://github.com/scip-code/scip)
 * **License:** Apache License 2.0
 * **Runtime Requirement:** Language-specific indexers (`scip-typescript`, `scip-go`, etc.)
 

@@ -5,16 +5,15 @@ const { tempRepo, git, writeFiles } = require('./helpers');
 
 const flagged = text => lintContent(text).map(v => v.pattern);
 
-test('flags binary contrast in English and Spanish', () => {
+test('flags binary contrast', () => {
     assert.match(flagged('It is not a tool, it is an operating system.')[0], /Binary Contrast/);
     assert.match(flagged("It's not a library; it's a runtime.")[0], /Binary Contrast/);
-    assert.match(flagged('No es una herramienta, es un sistema operativo.')[0], /Binary Contrast/);
-    assert.match(flagged('No es una herramienta sino un sistema.')[0], /Binary Contrast/);
+    assert.match(flagged("That's not a bug, but rather a contract.")[0], /Binary Contrast/);
 });
 
-test('does not flag ordinary Spanish or English sentences', () => {
-    assert.deepStrictEqual(flagged('La API no es rápida porque es síncrona.'), []);
+test('does not flag ordinary sentences that contain "not"', () => {
     assert.deepStrictEqual(flagged('It is not cached because it is generated per request.'), []);
+    assert.deepStrictEqual(flagged('This is not supported on Windows.'), []);
 });
 
 test('flags buzzwords listed in the no-ai-slop skill', () => {

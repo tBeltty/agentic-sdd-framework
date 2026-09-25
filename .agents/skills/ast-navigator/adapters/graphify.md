@@ -2,7 +2,7 @@
 
 * **Upstream Organization:** Graphify Labs (`@Graphify-Labs`)
 * **Repository:** [https://github.com/Graphify-Labs/graphify](https://github.com/Graphify-Labs/graphify)
-* **License:** Apache License 2.0 / MIT
+* **License:** Apache License 2.0
 * **Runtime Requirement:** Python 3.10+ (`pip install graphifyy`)
 
 ## Capabilities and Mechanics
