@@ -3,6 +3,20 @@
   "version": "1.0.0",
   "description": "The Universal Open-Source Operating System for Spec-Driven Development with AI Agents",
   "main": "scripts/sdd-init.js",
+  "bin": {
+    "sdd-init": "scripts/sdd-init.js"
+  },
+  "files": [
+    "scripts/",
+    ".agents/",
+    "docs/",
+    "sdd.config.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.17"
+  },
   "scripts": {
     "test": "node --test",
     "init": "node scripts/sdd-init.js",

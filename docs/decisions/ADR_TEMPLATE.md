@@ -1,4 +1,4 @@
-# ADR-0001: Technology Stack and Architecture Selection
+# ADR-[NNNN]: [Decision Title]
 
 **Status:** Accepted | Proposed | Superseded  
 **Date:** [YYYY-MM-DD]  
