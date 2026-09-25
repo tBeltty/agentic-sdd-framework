@@ -17,6 +17,9 @@ const fs = require('fs');
 const path = require('path');
 
 const FRAMEWORK_ROOT = path.resolve(__dirname, '..', '..');
+
+// Checkouts may use CRLF (Windows with core.autocrlf); compare and write LF content.
+const readNormalized = file => fs.readFileSync(file, 'utf8').replace(/\r\n?/g, '\n');
 const SKILL_DIR = '.agents/skills/auditor-executor-protocol';
 const TEMPLATE_DIR = 'docs/roadmap/templates';
 
@@ -52,17 +55,17 @@ function main() {
 
     for (const [src, rel] of mappings(canonical)) {
         const dest = path.join(FRAMEWORK_ROOT, rel);
-        const upstream = fs.readFileSync(src);
-        const same = fs.existsSync(dest) && fs.readFileSync(dest).equals(upstream);
+        const upstream = readNormalized(src);
+        const same = fs.existsSync(dest) && readNormalized(dest) === upstream;
         if (same) continue;
-        drift.push(rel);
+        drift.push(rel.split(path.sep).join('/'));
         if (!check) {
             fs.mkdirSync(path.dirname(dest), { recursive: true });
             fs.writeFileSync(dest, upstream);
         }
     }
     for (const rel of orphans(canonical)) {
-        drift.push(`${rel} (removed upstream)`);
+        drift.push(`${rel.split(path.sep).join('/')} (removed upstream)`);
         if (!check) fs.rmSync(path.join(FRAMEWORK_ROOT, rel));
     }
 
