@@ -62,3 +62,6 @@ yarn-error.log*
 .vscode/
 *.swp
 *.swo
+
+# Canonical protocol checkout used by CI drift checks
+.canonical/

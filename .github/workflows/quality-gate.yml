@@ -24,6 +24,18 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
 
+      - name: Install auditkit (Rigor mode checks)
+        run: pipx install git+https://github.com/tBeltty/auditor-executor-protocol
+
+      - name: Check out the canonical protocol repository
+        uses: actions/checkout@v4
+        with:
+          repository: tBeltty/auditor-executor-protocol
+          path: .canonical
+
+      - name: Check vendored protocol files against the canonical repository
+        run: node scripts/dev/sync-vendored.js .canonical --check
+
       - name: Run Framework Tests
         run: npm test
 
