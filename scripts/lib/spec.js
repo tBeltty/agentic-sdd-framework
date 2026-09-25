@@ -4,9 +4,16 @@
  * Parser and writers for the Lite Mode specification (docs/SPEC.md, from
  * docs/SPEC_TEMPLATE.md): status, task checklist with evidence, verification gate.
  *
- * Any checkbox list item is a task (bullets or numbered); its ID is the bold `**T1:**`
- * prefix when present, otherwise "line N". Line endings are normalized before parsing and
- * preserved when writing.
+ * Any checkbox list item is a task (bullets or numbered, also inside blockquotes); its ID
+ * is the bold `**T1:**` prefix when present, otherwise "line N". Content inside fenced code
+ * blocks and HTML comments is ignored, as it is when the Markdown is rendered. Line endings
+ * are normalized before parsing and preserved when writing.
+ *
+ * Records written by sdd-verify carry integrity hashes: task evidence covers its date, exit
+ * code and transcript; "Last Verified" covers every field plus the verification command and
+ * expected output. Editing a record by hand is detected. The hashes are not keyed, so they
+ * cannot stop someone who deliberately recomputes them; the authoritative check is running
+ * `sdd-verify` again, for example in CI.
  */
 
 const crypto = require('crypto');
@@ -19,15 +26,53 @@ const STATUSES = ['draft', 'in progress', 'completed'];
 // contain more than a single bracketed span.
 const isPlaceholder = text => /^\[[^\]]*\]$/.test(text.trim());
 
+const TEMPLATE_STATUS = 'Draft | In Progress | Completed';
 const TASK_RE = /^(\s*)(?:[*+-]|\d+[.)])\s+\[( |x|X)\]\s+(.*)$/;
 const FIELD_RE = /^(\s*)[*+-]\s+\*\*([^*]+):\*\*\s*(.*)$/;
 const LAST_VERIFIED_RE = /^\s*[*+-]\s+\*\*Last Verified:\*\*\s*(.*)$/;
 const LAST_VERIFIED_VALUE_RE =
-    /^(\d{4}-\d{2}-\d{2}) (PASS|FAIL) \(commit ([^,()]+), exit ([^,()]+), state ([0-9a-f]{16})\)$/;
+    /^(\d{4}-\d{2}-\d{2}) (PASS|FAIL) \(commit ([^,()]+), exit ([^,()]+), state ([0-9a-f]{16}), check ([0-9a-f]{16})\)$/;
 const RECORDED_EVIDENCE_RE = /^sdd-verify (\d{4}-\d{2}-\d{2}), exit (-?\d+|timeout|signal \w+), sha256 ([0-9a-f]{16})$/;
 
 const indentOf = line => line.match(/^\s*/)[0].length;
 const shortHash = text => crypto.createHash('sha256').update(text).digest('hex').slice(0, 16);
+const stripQuote = line => line.replace(/^(\s*>\s?)+/, '');
+
+// Lines that render as content: blank out fenced code and HTML comments (keeping line numbers).
+function visibleLines(lines) {
+    const fence = createFenceTracker();
+    let inComment = false;
+    return lines.map(line => {
+        if (!inComment && (fence.update(line) || fence.inside)) return '';
+        let out = '';
+        let rest = line;
+        while (rest.length > 0) {
+            if (inComment) {
+                const end = rest.indexOf('-->');
+                if (end === -1) return out;
+                inComment = false;
+                rest = rest.slice(end + 3);
+            } else {
+                const start = rest.indexOf('<!--');
+                if (start === -1) return out + rest;
+                out += rest.slice(0, start);
+                inComment = true;
+                rest = rest.slice(start + 4);
+            }
+        }
+        return out;
+    });
+}
+
+// Integrity hash of task evidence: date, exit code and transcript together.
+function evidenceHash(date, exit, transcript) {
+    return shortHash(`${date}\n${exit}\n${transcript}`);
+}
+
+// Integrity hash of a Last Verified record, bound to the command and expected output.
+function lastVerifiedCheck({ date, result, commit, exit, state }, command, expected) {
+    return shortHash([date, result, commit, exit, state, command, expected].join('\n'));
+}
 
 // Content of the first fenced block within lines[from, to), dedented to its fence.
 function firstFence(lines, from, to) {
@@ -47,11 +92,12 @@ function firstFence(lines, from, to) {
     return null;
 }
 
-function parseStatus(text) {
-    const match = text.match(/^\*\*Status:\*\*\s*(.+?)\s*$/m);
-    if (!match) return { status: null, problem: 'No "**Status:**" line.' };
-    const raw = match[1];
-    if (raw.includes('|')) return { status: null, problem: null }; // untouched template value
+function parseStatus(visible) {
+    const found = visible.map(l => l.match(/^\*\*Status:\*\*\s*(.+?)\s*$/)).filter(Boolean);
+    if (found.length === 0) return { status: null, problem: 'No "**Status:**" line.' };
+    if (found.length > 1) return { status: null, problem: `${found.length} "**Status:**" lines; keep exactly one.` };
+    const raw = found[0][1];
+    if (raw === TEMPLATE_STATUS) return { status: null, problem: null }; // untouched template
     const value = raw.toLowerCase();
     if (STATUSES.includes(value)) return { status: value, problem: null };
     return { status: null, problem: `Unknown status "${raw}". Use Draft, In Progress, or Completed.` };
@@ -65,7 +111,7 @@ function gateBounds(lines) {
 }
 
 function parseEvidence(lines, fieldIndex, end) {
-    const header = lines[fieldIndex].match(FIELD_RE)[3].trim();
+    const header = stripQuote(lines[fieldIndex]).match(FIELD_RE)[3].trim();
     const content = firstFence(lines, fieldIndex + 1, end);
     const body = lines.slice(fieldIndex + 1, end).map(l => l.trim()).filter(l => l && !/^(`{3,}|~{3,})/.test(l)).join('\n');
     const text = [isPlaceholder(header) ? '' : header, body].filter(Boolean).join('\n').trim();
@@ -75,17 +121,18 @@ function parseEvidence(lines, fieldIndex, end) {
             date: recordedMatch[1],
             exit: recordedMatch[2],
             hash: recordedMatch[3],
-            intact: content !== null && shortHash(content) === recordedMatch[3]
+            intact: content !== null && evidenceHash(recordedMatch[1], recordedMatch[2], content) === recordedMatch[3]
         }
         : null;
     return { text, recorded, range: [fieldIndex, end] };
 }
 
-function parseTasks(lines) {
+function parseTasks(rawLines) {
     const tasks = [];
-    const fence = createFenceTracker();
+    // Task detection runs on rendered content, with blockquote markers removed.
+    const lines = visibleLines(rawLines).map(stripQuote);
+    const unquoted = rawLines.map(stripQuote);
     for (let i = 0; i < lines.length; i++) {
-        if (fence.update(lines[i]) || fence.inside) continue;
         const match = lines[i].match(TASK_RE);
         if (!match) continue;
         const indent = match[1].length;
@@ -95,30 +142,30 @@ function parseTasks(lines) {
             line: i,
             checked: match[2] !== ' ',
             title: (bold ? bold[2] : match[3]).trim(),
-            evidence: { text: '', recorded: null, range: null }
+            evidence: { text: '', recorded: null, range: null },
+            quoted: /^\s*>/.test(rawLines[i])
         };
         // The task block: following lines indented deeper than the checkbox (or blank).
         let end = i + 1;
         const inner = createFenceTracker();
-        while (end < lines.length) {
-            const line = lines[end];
+        while (end < unquoted.length) {
+            const line = unquoted[end];
             const delimiter = inner.update(line);
             if (!delimiter && !inner.inside && line.trim() !== '' && indentOf(line) <= indent) break;
             end++;
         }
-        while (end > i + 1 && lines[end - 1].trim() === '') end--;
+        while (end > i + 1 && unquoted[end - 1].trim() === '') end--;
         // Fields inside the block; the Evidence field runs until the next field or the end.
-        const fieldFence = createFenceTracker();
         const fields = [];
         for (let j = i + 1; j < end; j++) {
-            if (fieldFence.update(lines[j]) || fieldFence.inside) continue;
             const field = lines[j].match(FIELD_RE);
             if (field && indentOf(lines[j]) > indent) fields.push({ name: field[2].trim().toLowerCase(), index: j });
         }
         const evidenceAt = fields.findIndex(f => f.name === 'evidence');
         if (evidenceAt !== -1) {
             const next = fields[evidenceAt + 1];
-            task.evidence = parseEvidence(lines, fields[evidenceAt].index, next ? next.index : end);
+            // Evidence content (fences included) is read from the unrendered lines.
+            task.evidence = parseEvidence(unquoted, fields[evidenceAt].index, next ? next.index : end);
         }
         task.blockEnd = end;
         tasks.push(task);
@@ -129,13 +176,19 @@ function parseTasks(lines) {
 function parseLastVerified(value) {
     const match = value.match(LAST_VERIFIED_VALUE_RE);
     if (!match) return null;
-    return { date: match[1], result: match[2], commit: match[3], exit: match[4], state: match[5] };
+    return { date: match[1], result: match[2], commit: match[3], exit: match[4], state: match[5], check: match[6] };
+}
+
+function formatLastVerified(fields, command, expected) {
+    const check = lastVerifiedCheck(fields, command, expected);
+    return `${fields.date} ${fields.result} (commit ${fields.commit}, exit ${fields.exit}, state ${fields.state}, check ${check})`;
 }
 
 function parseSpec(rawText) {
     const text = normalizeEol(rawText);
     const lines = text.split('\n');
-    const bounds = gateBounds(lines);
+    const visible = visibleLines(lines);
+    const bounds = gateBounds(visible);
     let gate = null;
     if (bounds) {
         const [from, to] = bounds;
@@ -144,7 +197,7 @@ function parseSpec(rawText) {
         const expectedAt = labelAt(/\*\*Expected Output:\*\*/i);
         const command = commandAt === -1 ? null : firstFence(lines, commandAt + 1, to);
         const expected = expectedAt === -1 ? null : firstFence(lines, expectedAt + 1, to);
-        const lastIndex = labelAt(LAST_VERIFIED_RE);
+        const lastIndex = visible.findIndex((l, i) => i >= from && i < to && LAST_VERIFIED_RE.test(l));
         const lastValue = lastIndex === -1 ? '' : lines[lastIndex].match(LAST_VERIFIED_RE)[1].trim();
         gate = {
             command: command && !isPlaceholder(command) ? command.trim() : '',
@@ -152,8 +205,12 @@ function parseSpec(rawText) {
             lastVerified: lastValue && !isPlaceholder(lastValue) ? lastValue : '',
             lastVerifiedParsed: parseLastVerified(lastValue)
         };
+        if (gate.lastVerifiedParsed) {
+            gate.lastVerifiedParsed.intact =
+                lastVerifiedCheck(gate.lastVerifiedParsed, gate.command, gate.expected) === gate.lastVerifiedParsed.check;
+        }
     }
-    const { status, problem } = parseStatus(text);
+    const { status, problem } = parseStatus(visible);
     return { status, statusProblem: problem, tasks: parseTasks(lines), gate };
 }
 
@@ -184,9 +241,11 @@ function withLastVerified(rawText, value) {
 function formatRecordedEvidence({ date, exit, transcript, indent }) {
     const pad = ' '.repeat(indent);
     const content = transcript.replace(/\s+$/, '');
-    const fenceMarker = content.includes('```') ? '~~~~' : '```';
+    // A backtick fence longer than any backtick run in the content cannot close early.
+    const longestRun = Math.max(0, ...(content.match(/`+/g) || []).map(run => run.length));
+    const fenceMarker = '`'.repeat(Math.max(3, longestRun + 1));
     return [
-        `${pad}* **Evidence:** sdd-verify ${date}, exit ${exit}, sha256 ${shortHash(content)}`,
+        `${pad}* **Evidence:** sdd-verify ${date}, exit ${exit}, sha256 ${evidenceHash(date, exit, content)}`,
         `${pad}  ${fenceMarker}text`,
         ...content.split('\n').map(l => (l ? `${pad}  ${l}` : '')),
         `${pad}  ${fenceMarker}`
@@ -198,6 +257,7 @@ function withTaskEvidence(rawText, taskId, evidence) {
     const lines = normalizeEol(rawText).split('\n');
     const task = parseTasks(lines).find(t => t.id === taskId);
     if (!task) throw new Error(`Task ${taskId} not found in the specification.`);
+    if (task.quoted) throw new Error(`Task ${taskId} is inside a blockquote; move it out before recording evidence.`);
     const indent = indentOf(lines[task.line]) + 2;
     const block = formatRecordedEvidence({ ...evidence, indent });
     if (task.evidence.range) {
@@ -213,6 +273,6 @@ function withTaskEvidence(rawText, taskId, evidence) {
 }
 
 module.exports = {
-    STATUSES, isPlaceholder, shortHash, parseSpec, parseLastVerified,
-    withLastVerified, withTaskEvidence, formatRecordedEvidence
+    STATUSES, isPlaceholder, shortHash, parseSpec, parseLastVerified, formatLastVerified, lastVerifiedCheck,
+    evidenceHash, withLastVerified, withTaskEvidence, formatRecordedEvidence
 };

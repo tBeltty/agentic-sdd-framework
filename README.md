@@ -58,7 +58,7 @@ graph TD
   * `execution-guide.md`: the "how" (numbered tasks `P<phase>-T<n>` and gates `P<phase>-G<n>`).
   * `compliance-log.md`: the ledger of pasted command output and verdicts.
   * `annexes/`: self-contained remediation orders issued after a verdict that is not a clean `APPROVED`.
-* **Mechanical Checks:** the quality gate runs `auditkit lint` (0.3.0 or newer), which rejects missing or orphaned task entries, gates without a negative control, and `DONE` reports without pasted verify output.
+* **Mechanical Checks:** the quality gate runs `auditkit lint` (0.3.1 or newer), which rejects missing or orphaned task entries, gates without a negative control, and `DONE` reports without pasted verify output.
 * **Best For:** Multi-agent handoffs, asynchronous work, and regulated domains.
 
 ---
@@ -76,20 +76,20 @@ Run the wizard from the root of a new or existing Git repository. Pin a release 
 
 ```bash
 cd my-project
-npx github:tBeltty/agentic-sdd-framework#v1.3.0
+npx github:tBeltty/agentic-sdd-framework#v1.4.0
 ```
 
 Express mode skips the interview and takes every answer from flags:
 
 ```bash
-npx github:tBeltty/agentic-sdd-framework#v1.3.0 --express --mode=lite --ast=ast-grep --runtime=go-1.23
+npx github:tBeltty/agentic-sdd-framework#v1.4.0 --express --mode=lite --ast=ast-grep --runtime=go-1.23
 ```
 
 ### 2. Start from a Clone
 Use the framework repository itself as the starting point of a new project:
 
 ```bash
-git clone --branch v1.3.0 https://github.com/tBeltty/agentic-sdd-framework.git my-project
+git clone --branch v1.4.0 https://github.com/tBeltty/agentic-sdd-framework.git my-project
 cd my-project
 node scripts/sdd-init.js
 ```
@@ -141,7 +141,7 @@ When `core.hooksPath` is set (Husky, lefthook, or a shared hooks directory), the
 | *(no flag)* | Tracked files in the working tree |
 | `--staged` | The index: what the next commit contains |
 | `--ref=<commit>` | The content of that commit |
-| `--push [remote]` | Pre-push mode (used by the hook): every check on each pushed commit, plus a secret scan of every new commit in the push, so a secret added and later removed is still caught |
+| `--push [remote]` | Pre-push mode (used by the hook): every check on the tip commit of each pushed ref, plus a secret scan of every new commit in the push (merge commits included), so a secret added and later removed is still caught. Refs whose commit is already on the remote are skipped |
 
 A check that cannot read the repository (not a Git repository, Git error, unreadable file) fails; it never reports "0 files, all clean". An invalid `sdd.config.json` (unknown key, wrong type, unknown value) fails every check with the exact problem.
 
@@ -160,15 +160,17 @@ The secret scanner reports provider keys (Anthropic, OpenAI, Stripe, GitHub, Sla
 | Mode | Rule |
 | :--- | :--- |
 | Lite, any status | Status is `Draft`, `In Progress`, or `Completed`; the `Verification Gate` section exists; every checked task (any checkbox list item) has evidence |
-| Lite, recorded evidence | Evidence written by `sdd-verify --task` must be unedited (hash match) and exit 0 |
+| Lite, recorded evidence | Evidence written by `sdd-verify --task` must be unedited (the hash covers the date, exit code, and transcript) and exit 0 |
 | Lite, hand-written evidence | Accepted and counted in the report; rejected when `specification.requireRecordedEvidence` is `true` |
 | Lite, `In Progress` | The verification command and expected output are filled in, not template placeholders |
-| Lite, `Completed` | Every task is checked, and `Last Verified` is a PASS written by `sdd-verify --record` whose state fingerprint matches the content the spec was completed with |
+| Lite, `Completed` | Every task is checked, and `Last Verified` is an unedited PASS written by `sdd-verify --record` for the current verification command and expected output, whose state fingerprint matches the content the spec was completed with |
 | Rigor | `auditkit lint docs/roadmap` exits 0 |
 
-`sdd-verify --record` runs the spec's verification command, checks that every expected line appears in the output (`/.../` lines are regular expressions), fails if the command modified tracked files, and writes `Last Verified: <date> PASS|FAIL (commit <sha>, exit <code>, state <fingerprint>)`. The fingerprint covers every tracked file except the spec. The gate recomputes it for the commit that completed the spec (or the uncommitted state), so files changed after the verification invalidate the PASS. Later commits that do not touch the spec do not reopen it: catching regressions after a spec is closed is the job of CI and tests.
+`sdd-verify --record` runs the spec's verification command, checks that every expected line appears in the output (`/.../` lines are regular expressions), fails if the command modified tracked files, and writes `Last Verified: <date> PASS|FAIL (commit <sha>, exit <code>, state <fingerprint>, check <hash>)`. The fingerprint covers every tracked file except the spec. The check hash covers the other fields plus the verification command and expected output, so editing the result, or changing the command after recording, reopens the spec. `--record` refuses to run while there are untracked files, because they would take part in the run without being part of the recorded state; commit, ignore, or remove them first. The gate recomputes it for the commit that completed the spec (or the uncommitted state), so files changed after the verification invalidate the PASS. Later commits that do not touch the spec do not reopen it: catching regressions after a spec is closed is the job of CI and tests.
 
-Commands run in `specification.verifyShell` (default `/bin/sh` on macOS and Linux, `cmd.exe` on Windows) with a limit of `specification.verifyTimeoutSeconds` (default 900). The gate never runs a command from the spec itself; it only checks recorded results. Recorded evidence proves the transcript was not edited after recording; it cannot prove a verification command is meaningful, which remains the reviewer's call.
+Commands run in `specification.verifyShell` (default `/bin/sh` on macOS and Linux, `cmd.exe` on Windows) with a limit of `specification.verifyTimeoutSeconds` (default 900). The gate never runs a command from the spec itself; it only checks recorded results. On timeout the whole process tree is killed, including background processes the command started.
+
+The hashes are integrity checks, not signatures: they catch hand edits and stale records, but anyone who can run `sdd-verify` can also write a matching record. For an authoritative result, have CI run `sdd-verify` again. Recorded evidence also cannot prove a verification command is meaningful; that remains the reviewer's call.
 
 `check-system-prerequisites.js` (Git identity, `gh` authentication, SSH keys) runs once inside the wizard and is available as `npm run check:prereqs`. It is not part of the gate because it depends on the local machine, not on the code.
 

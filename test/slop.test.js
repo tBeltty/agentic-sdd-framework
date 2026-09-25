@@ -66,3 +66,16 @@ test('F18: a fence only closes with a matching marker of at least the same lengt
 test('CRLF prose is linted line by line', () => {
     assert.deepStrictEqual(flagged('fine\r\nA robust plan.\r\n'), ['AI Buzzword']);
 });
+
+test('N10: Rigor records under the configured roadmapDir are not linted; other docs are', () => {
+    const repo = tempRepo();
+    writeFiles(repo, {
+        'sdd.config.json': JSON.stringify({ specification: { roadmapDir: 'plans' } }),
+        'plans/compliance-log.md': 'A robust plan.\n'
+    });
+    git(repo, 'add', '-A');
+    assert.strictEqual(run({ root: repo }).ok, true);
+    writeFiles(repo, { 'docs/roadmap/notes.md': 'A robust plan.\n' });
+    git(repo, 'add', '-A');
+    assert.strictEqual(run({ root: repo }).ok, false, 'docs/roadmap/ is only excluded when it is the roadmapDir');
+});

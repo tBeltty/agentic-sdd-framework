@@ -29,50 +29,79 @@ function entropy(value) {
     }, 0);
 }
 
-// A value assigned to a secret-named key is reported only if it looks like a literal
-// secret: letters and digits, high entropy, and not a reference to somewhere else.
-function looksLikeLiteralSecret(value) {
-    if (!/[A-Za-z]/.test(value) || !/\d/.test(value)) return false;
-    if (/^[A-Za-z_$][\w$]*(\.[\w$]+)+$/.test(value)) return false; // process.env.X, config.db.password
-    if (/^[A-Z0-9_]+$/.test(value)) return false; // CONSTANT_NAME
-    if (/^\$|^%|\$\{|\{\{|<[^>]*>/.test(value)) return false; // $VAR, %VAR%, ${VAR}, {{var}}, <value>
-    return entropy(value) >= 3.0;
-}
-
-// Ordered from most to least specific; the first match on a line wins.
+// Ordered from most to least specific; every match of every pattern on a line is checked,
+// so a placeholder earlier on the line cannot hide a real key later on it.
 const SECRET_PATTERNS = [
-    { name: 'Private Key Block', regex: /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----/ },
-    { name: 'Anthropic API Key', regex: /\bsk-ant-[0-9A-Za-z_-]{20,}/ },
-    { name: 'OpenAI API Key', regex: /\bsk-(?:proj|svcacct|admin)-[0-9A-Za-z_-]{20,}/ },
-    { name: 'OpenAI Legacy API Key', regex: /\bsk-[0-9A-Za-z]{32,}\b/ },
-    { name: 'Stripe Live Key', regex: /\b[rs]k_live_[0-9A-Za-z]{16,}/ },
-    { name: 'GitHub Token', regex: /\bgh[pousr]_[0-9A-Za-z]{36}\b/ },
-    { name: 'GitHub Fine-Grained Token', regex: /\bgithub_pat_[0-9A-Za-z_]{22,}/ },
-    { name: 'Slack Token', regex: /\bxox[abposr]-[0-9A-Za-z-]{10,}/ },
+    { name: 'Private Key Block', regex: /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----/g },
+    { name: 'Anthropic API Key', regex: /\bsk-ant-[0-9A-Za-z_-]{20,}/g },
+    { name: 'OpenAI API Key', regex: /\bsk-(?:proj|svcacct|admin)-[0-9A-Za-z_-]{20,}/g },
+    { name: 'OpenAI Legacy API Key', regex: /\bsk-[0-9A-Za-z]{32,}\b/g },
+    { name: 'Stripe Live Key', regex: /\b[rs]k_live_[0-9A-Za-z]{16,}/g },
+    { name: 'GitHub Token', regex: /\bgh[pousr]_[0-9A-Za-z]{36}\b/g },
+    { name: 'GitHub Fine-Grained Token', regex: /\bgithub_pat_[0-9A-Za-z_]{22,}/g },
+    { name: 'Slack Token', regex: /\bxox[abposr]-[0-9A-Za-z-]{10,}/g },
     // Requires both a digit and a letter so identifiers like re_compiled_pattern_list pass.
-    { name: 'Resend API Key', regex: /\bre_(?=[A-Za-z_]*\d)(?=[0-9_]*[A-Za-z])[0-9A-Za-z_]{24,}/ },
-    { name: 'AWS Access Key ID', regex: /\b(?:AKIA|ABIA|ACCA|ASIA)[0-9A-Z]{16}\b/ },
-    { name: 'Google API Key', regex: /\bAIza[0-9A-Za-z_-]{35}/ },
+    { name: 'Resend API Key', regex: /\bre_(?=[A-Za-z_]*\d)(?=[0-9_]*[A-Za-z])[0-9A-Za-z_]{24,}/g },
+    { name: 'AWS Access Key ID', regex: /\b(?:AKIA|ABIA|ACCA|ASIA)[0-9A-Z]{16}\b/g },
+    { name: 'Google API Key', regex: /\bAIza[0-9A-Za-z_-]{35}/g },
     {
         name: 'Credentials in URL',
-        regex: /\b[a-z][a-z0-9+.-]*:\/\/[^\s:/@'"]+:([^\s@/'"]{6,})@/i,
+        regex: /\b[a-z][a-z0-9+.-]*:\/\/[^\s:/@'"]+:([^\s@/'"]{6,})@/gi,
         group: 1,
-        accept: value => !/^\$|\$\{|\{\{|<[^>]*>|^\*+$/.test(value)
-    },
-    {
-        name: 'Secret Assignment',
-        regex: /(?:^|[^A-Za-z0-9])(?:(?:api|secret|private|access|refresh|auth|client|bearer)[_-]?(?:key|token|secret)|password|passwd|pwd)["']?\s*[:=]\s*["']?([^\s"'`,;()]{12,})/i,
-        group: 1,
-        accept: looksLikeLiteralSecret
+        accept: value => !isReference(value) && !/^\*+$/.test(value)
     }
 ];
+
+// Keys whose value is a secret: ends in secret, token, password, pwd, api key, private or
+// access key, or credential(s). `max_tokens` or `tokenizer` do not match.
+const SECRET_KEY_RE = /(?:^|[^A-Za-z0-9_])([A-Za-z0-9_.-]*?(?:secret|token|passw(?:or)?d|pwd|api[_-]?key|private[_-]?key|access[_-]?key|credentials?))["']?\s*[:=]\s*(.*)$/i;
+const PASSWORD_KEY_RE = /passw(?:or)?d|pwd|secret|credential/i;
+// Files where an unquoted value is a literal (KEY=value), not a code expression.
+const CONFIG_FILE_RE = /(^|\/)\.env(\.[^/]*)?$|\.(env|ini|cfg|conf|properties|toml|ya?ml|json)$/i;
+
+// Shannon entropy in bits per character.
+function entropy(value) {
+    const counts = {};
+    for (const ch of value) counts[ch] = (counts[ch] || 0) + 1;
+    return Object.values(counts).reduce((sum, n) => {
+        const p = n / value.length;
+        return sum - p * Math.log2(p);
+    }, 0);
+}
+
+// $VAR, ${VAR}, %VAR%, {{var}}, <value>, process.env.X, os.environ[...]
+function isReference(value) {
+    return /^\$|\$\{|^%\w+%$|\{\{|<[^>]*>|process\.env|os\.environ|getenv/.test(value);
+}
 
 // Checked against the matched value only; a placeholder elsewhere on the line does not
 // hide a real key.
 const SAFE_PLACEHOLDERS = [
     'test_secret', 'test-secret', 'your_api_key', 'your-api-key', 'dummy', 'placeholder',
-    'mock_key', 'example', 'xxxxxxxx', 'changeme', 'redacted'
+    'mock_key', 'example', 'xxxxxxxx', 'changeme', 'redacted', 'fake', 'sample'
 ];
+const isPlaceholder = value => SAFE_PLACEHOLDERS.some(p => value.toLowerCase().includes(p))
+    || /^(password|secret|token|none|null|undefined|true|false)$/i.test(value);
+
+// The literal assigned to a secret-named key, if any. In code, only quoted values are
+// literals (an unquoted value is an expression such as a call or a variable); in config
+// files, an unquoted value is a literal too.
+function secretAssignment(line, { configFile }) {
+    const match = line.match(SECRET_KEY_RE);
+    if (!match) return null;
+    const [, key, rest] = match;
+    const quoted = rest.match(/^(["'`])((?:\\.|(?!\1).)*)\1/);
+    let value;
+    if (quoted) value = quoted[2];
+    // `#` starts a comment only after whitespace (dotenv, YAML), so it can be part of a value.
+    else if (configFile) value = (rest.match(/^\S+/) || [''])[0].replace(/[,;]$/, '');
+    else return null;
+    if (value.length < 8 || isPlaceholder(value) || isReference(value)) return null;
+    if (/\s/.test(value)) return null; // prose, not a credential
+    // Passwords can be low-entropy words; tokens and keys must look random.
+    if (!PASSWORD_KEY_RE.test(key) && (value.length < 16 || entropy(value) < 3.0)) return null;
+    return { key, value };
+}
 
 const ALLOW_PRAGMA = 'sdd-allow-secret';
 
@@ -92,25 +121,43 @@ function maskMatch(str) {
     return str.slice(0, 4) + '...' + str.slice(-4);
 }
 
-function scanContent(content) {
+function findInLine(line, options) {
+    for (const pattern of SECRET_PATTERNS) {
+        for (const match of line.matchAll(pattern.regex)) {
+            const value = pattern.group ? match[pattern.group] : match[0];
+            if (isPlaceholder(value)) continue;
+            if (pattern.accept && !pattern.accept(value)) continue;
+            return { patternName: pattern.name, value };
+        }
+    }
+    const assignment = secretAssignment(line, options);
+    return assignment ? { patternName: 'Secret Assignment', value: assignment.value } : null;
+}
+
+// `file` (a repository path) decides whether unquoted values count as literals.
+function scanContent(content, { file = '' } = {}) {
+    const options = { configFile: CONFIG_FILE_RE.test(file) };
     const violations = [];
     let suppressed = 0;
     content.split(/\r?\n/).forEach((line, index) => {
-        for (const pattern of SECRET_PATTERNS) {
-            const match = line.match(pattern.regex);
-            if (!match) continue;
-            const value = pattern.group ? match[pattern.group] : match[0];
-            if (SAFE_PLACEHOLDERS.some(p => value.toLowerCase().includes(p))) continue;
-            if (pattern.accept && !pattern.accept(value)) continue;
-            if (line.includes(ALLOW_PRAGMA)) {
-                suppressed++;
-                break;
-            }
-            violations.push({ line: index + 1, patternName: pattern.name, snippet: maskMatch(value) });
-            break;
+        const hit = findInLine(line, options);
+        if (!hit) return;
+        if (line.includes(ALLOW_PRAGMA)) {
+            suppressed++;
+            return;
         }
+        violations.push({ line: index + 1, patternName: hit.patternName, snippet: maskMatch(hit.value) });
     });
     return { violations, suppressed };
+}
+
+// Text to scan from a file's bytes. UTF-16 files are decoded; other binary files are
+// reduced to their printable runs (like `strings`), so a NUL byte cannot hide a secret.
+function textOf(buffer) {
+    if (buffer[0] === 0xff && buffer[1] === 0xfe) return buffer.subarray(2).toString('utf16le');
+    if (buffer[0] === 0xfe && buffer[1] === 0xff) return Buffer.from(buffer.subarray(2)).swap16().toString('utf16le');
+    if (!isBinary(buffer)) return buffer.toString('utf8');
+    return (buffer.toString('latin1').match(/[\x20-\x7e]{8,}/g) || []).join('\n');
 }
 
 function sensitiveFileName(file) {
@@ -134,8 +181,8 @@ function run({ root, source = WORKTREE, files: only = null } = {}) {
         }
     }
     for (const [file, buffer] of readFiles(root, files, source)) {
-        if (!buffer || isBinary(buffer)) continue;
-        const result = scanContent(buffer.toString('utf8'));
+        if (!buffer) continue;
+        const result = scanContent(textOf(buffer), { file });
         suppressed += result.suppressed;
         for (const v of result.violations) violations.push({ file, ...v });
     }
@@ -160,4 +207,4 @@ if (require.main === module) {
     runCheckCli('🔒 Agentic SDD Framework: Secret Leak Scanner', run);
 }
 
-module.exports = { SECRET_PATTERNS, entropy, looksLikeLiteralSecret, scanContent, sensitiveFileName, run };
+module.exports = { SECRET_PATTERNS, entropy, secretAssignment, scanContent, sensitiveFileName, textOf, run };

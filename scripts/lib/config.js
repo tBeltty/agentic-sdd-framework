@@ -33,6 +33,9 @@ function validate(value, schema, at, errors) {
             return;
         }
     }
+    if (typeof schema.minLength === 'number' && typeof value === 'string' && value.length < schema.minLength) {
+        errors.push(`${at}: must not be empty`);
+    }
     if (typeof schema.minimum === 'number' && typeof value === 'number' && value < schema.minimum) {
         errors.push(`${at}: must be >= ${schema.minimum}`);
     }
@@ -48,7 +51,8 @@ function validate(value, schema, at, errors) {
     if (schema.properties && typeOf(value) === 'object') {
         for (const [key, child] of Object.entries(value)) {
             const where = `${at}.${key}`;
-            if (schema.properties[key]) {
+            // Own properties only: "toString" or "__proto__" must not resolve to Object.prototype.
+            if (Object.prototype.hasOwnProperty.call(schema.properties, key)) {
                 validate(child, schema.properties[key], where, errors);
             } else if (schema.patternProperties && Object.keys(schema.patternProperties).some(p => new RegExp(p).test(key))) {
                 continue;

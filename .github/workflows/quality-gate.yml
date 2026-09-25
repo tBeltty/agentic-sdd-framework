@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ main ]
 
+# The protocol release this framework vendors and tests against.
+env:
+  PROTOCOL_VERSION: v0.3.1
+
 jobs:
   verify:
     name: Node ${{ matrix.node-version }} on ${{ matrix.os }}
@@ -31,12 +35,13 @@ jobs:
           node-version: ${{ matrix.node-version }}
 
       - name: Install auditkit (Rigor mode checks)
-        run: pipx install git+https://github.com/tBeltty/auditor-executor-protocol
+        run: pipx install git+https://github.com/tBeltty/auditor-executor-protocol@${{ env.PROTOCOL_VERSION }}
 
       - name: Check out the canonical protocol repository
         uses: actions/checkout@v4
         with:
           repository: tBeltty/auditor-executor-protocol
+          ref: ${{ env.PROTOCOL_VERSION }}
           path: .canonical
 
       - name: Check vendored protocol files against the canonical repository

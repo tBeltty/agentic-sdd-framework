@@ -1,10 +1,18 @@
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
+const created = [];
+process.on('exit', () => {
+    for (const dir of created) fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// Temporary directories are removed when the test process exits.
 function tempDir(prefix = 'sdd-test-') {
-    return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+    created.push(dir);
+    return dir;
 }
 
 function git(cwd, ...args) {
@@ -28,4 +36,10 @@ function writeFiles(root, files) {
     }
 }
 
-module.exports = { tempDir, tempRepo, git, writeFiles };
+// Runs a git hook as git does: directly on macOS/Linux, through Git for Windows' sh on Windows.
+function runHook(hookPath, args, options) {
+    const [file, argv] = process.platform === 'win32' ? ['sh', [hookPath, ...args]] : [hookPath, args];
+    return spawnSync(file, argv, { encoding: 'utf8', ...options });
+}
+
+module.exports = { tempDir, tempRepo, git, writeFiles, runHook };

@@ -1,6 +1,6 @@
 {
   "name": "agentic-sdd-framework",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Spec-Driven Development governance for AI coding agents: auto-loaded agent rules, specifications with recorded evidence, and a pre-push quality gate",
   "bin": {
     "sdd-init": "scripts/sdd-init.js"

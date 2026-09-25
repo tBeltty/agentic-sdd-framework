@@ -28,6 +28,7 @@ const path = require('path');
 const readline = require('readline');
 const { execFileSync, spawnSync } = require('child_process');
 const { FRAMEWORK_ROOT, provision } = require('./lib/provision');
+const { loadConfig, getIn } = require('./lib/config');
 
 const VALUE_FLAGS = ['target', 'name', 'runtime', 'mode', 'ast', 'concurrency', 'hardware', 'workload'];
 const BOOLEAN_FLAGS = ['express', 'i18n', 'pwa', 'force', 'help'];
@@ -75,16 +76,42 @@ function getArgValue(name, defaultValue) {
     return parsed.values.has(name) ? parsed.values.get(name) : defaultValue;
 }
 
-const DEFAULTS = {
-    runtime: 'node-24-lts',
-    concurrency: '1-10 internal',
-    hardware: '$5 VPS',
-    workload: 'I/O-heavy API'
-};
-
 const target = path.resolve(getArgValue('target', process.cwd()));
 const force = parsed.flags.has('force');
 const wantsExpress = parsed.flags.has('express') || ['mode', 'ast', 'name', 'runtime'].some(f => parsed.values.has(f));
+
+// A previous run's sdd.config.json seeds the wizard's defaults, so re-running sdd-init
+// (e.g. to pick up a new template version) doesn't reset answers the project already made.
+// The framework's own repository is exempt: its config describes the framework, not a template.
+function loadExistingDefaults() {
+    let config;
+    try {
+        config = loadConfig(target);
+    } catch {
+        return {};
+    }
+    if (getIn(config, 'project.type', 'application') === 'framework') return {};
+    return {
+        projectName: getIn(config, 'project.name'),
+        runtime: getIn(config, 'project.runtime'),
+        specMode: getIn(config, 'specification.mode'),
+        astAdapter: getIn(config, 'capabilities.astNavigation.adapter'),
+        concurrency: getIn(config, 'discovery.concurrency'),
+        hardware: getIn(config, 'discovery.hardware'),
+        workload: getIn(config, 'discovery.workload'),
+        i18n: getIn(config, 'capabilities.i18n.enabled'),
+        pwa: getIn(config, 'capabilities.pwa.enabled')
+    };
+}
+
+const EXISTING = loadExistingDefaults();
+
+const DEFAULTS = {
+    runtime: EXISTING.runtime || 'node-24-lts',
+    concurrency: EXISTING.concurrency || '1-10 internal',
+    hardware: EXISTING.hardware || '$5 VPS',
+    workload: EXISTING.workload || 'I/O-heavy API'
+};
 
 function printHeader() {
     console.log('\n===============================================================');
@@ -119,22 +146,22 @@ async function runGuidedMode() {
     }
 
     console.log('\n--- Step 2: Project Definition ---');
-    const projectName = await ask('Project Name', path.basename(target));
+    const projectName = await ask('Project Name', EXISTING.projectName || path.basename(target));
     const runtime = await ask('Primary Runtime / Stack (e.g. node-24-lts, go-1.23, python-3.12)', DEFAULTS.runtime);
 
     console.log('\n--- Step 3: 4-Pillar Discovery Interview (recorded in ADR-0001) ---');
     const concurrency = await ask('1. Expected peak concurrency (e.g. 1-10 internal, 100-1,000, 50k+ public)', DEFAULTS.concurrency);
     const hardware = await ask('2. Target deployment environment (e.g. local machine, $5 VPS, serverless, cloud)', DEFAULTS.hardware);
     const workload = await ask('3. Primary compute workload (e.g. I/O-heavy API, static SPA, live transcoding)', DEFAULTS.workload);
-    const i18n = await askYesNo('4a. Multi-language support (i18n) required?', false);
-    const pwa = await askYesNo('4b. Offline / Progressive Web App support required?', false);
+    const i18n = await askYesNo('4a. Multi-language support (i18n) required?', EXISTING.i18n === true);
+    const pwa = await askYesNo('4b. Offline / Progressive Web App support required?', EXISTING.pwa === true);
 
     console.log('\n--- Step 4: Specification Depth ---');
     console.log('  [1] 🟢 Lite Mode (Default): Single file docs/SPEC.md (Specify + Plan + Tasks + Gate).');
     console.log('      Recommended for solo developers and rapid MVP building.');
     console.log('  [2] 🔴 Rigor Mode: Plan of Record + Execution Guide + Compliance Log (+ Remediation annexes).');
     console.log('      Recommended for multi-agent teams and mission-critical systems.');
-    const specMode = (await ask('Select Mode (1 or 2)', '1')) === '2' ? 'rigor' : 'lite';
+    const specMode = (await ask('Select Mode (1 or 2)', EXISTING.specMode === 'rigor' ? '2' : '1')) === '2' ? 'rigor' : 'lite';
 
     console.log('\n--- Step 5: AST Navigation Adapter ---');
     console.log('  [1] ast-grep (Fast native Tree-sitter structural search, zero Python)');
@@ -142,7 +169,8 @@ async function runGuidedMode() {
     console.log('  [3] ripgrep (Universal fast regex baseline)');
     console.log('  [4] lsp (Language Server Protocol / SCIP compiler type indexing)');
     const astAdapters = { '1': 'ast-grep', '2': 'graphify', '3': 'ripgrep', '4': 'lsp' };
-    const astAdapter = astAdapters[await ask('Select AST Adapter (1-4)', '1')] || 'ast-grep';
+    const astDefault = Object.keys(astAdapters).find(key => astAdapters[key] === EXISTING.astAdapter) || '1';
+    const astAdapter = astAdapters[await ask('Select AST Adapter (1-4)', astDefault)] || 'ast-grep';
 
     rl.close();
     bootstrap({ projectName, runtime, specMode, astAdapter, concurrency, hardware, workload, i18n, pwa });
@@ -152,15 +180,15 @@ function runExpressMode() {
     printHeader();
     console.log(`⚡ Express Mode: provisioning ${target}\n`);
     bootstrap({
-        projectName: getArgValue('name', path.basename(target)),
+        projectName: getArgValue('name', EXISTING.projectName || path.basename(target)),
         runtime: getArgValue('runtime', DEFAULTS.runtime),
-        specMode: getArgValue('mode', 'lite').toLowerCase(),
-        astAdapter: getArgValue('ast', 'ast-grep').toLowerCase(),
+        specMode: getArgValue('mode', EXISTING.specMode || 'lite').toLowerCase(),
+        astAdapter: getArgValue('ast', EXISTING.astAdapter || 'ast-grep').toLowerCase(),
         concurrency: getArgValue('concurrency', DEFAULTS.concurrency),
         hardware: getArgValue('hardware', DEFAULTS.hardware),
         workload: getArgValue('workload', DEFAULTS.workload),
-        i18n: parsed.flags.has('i18n'),
-        pwa: parsed.flags.has('pwa')
+        i18n: parsed.flags.has('i18n') ? true : EXISTING.i18n === true,
+        pwa: parsed.flags.has('pwa') ? true : EXISTING.pwa === true
     });
 }
 

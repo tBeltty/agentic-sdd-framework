@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
-const { scanContent, sensitiveFileName, run } = require('../scripts/verify-no-secrets');
+const { scanContent, sensitiveFileName, textOf, run } = require('../scripts/verify-no-secrets');
 const { tempRepo, git, writeFiles } = require('./helpers');
 
 // Fixtures are assembled at runtime so this file never contains a literal key.
@@ -20,7 +20,7 @@ const KEYS = {
     'Google API Key': 'AIza' + alnum(20) + '-_' + alnum(13),
     'Private Key Block': '-----BEGIN ' + 'RSA PRIVATE KEY-----'
 };
-const found = text => scanContent(text).violations;
+const found = (text, file = '') => scanContent(text, { file }).violations;
 
 for (const [name, key] of Object.entries(KEYS)) {
     test(`detects ${name}`, () => {
@@ -42,30 +42,48 @@ test('F14: detects credentials embedded in URLs, ignores placeholders and variab
     assert.deepStrictEqual(found('see https://example.com/docs'), []);
 });
 
-test('F15: detects high-entropy values assigned to secret-named keys', () => {
-    for (const line of [
-        'DB_PASSWORD=Xk9' + '#mQ2vL7pR4tZ8',
-        'client_secret: "' + alnum(20) + '"',
-        'ACCESS_TOKEN=' + alnum(32),
-        'refresh-token = \'' + alnum(24) + '\''
+test('F15: detects literals assigned to secret-named keys (quoted anywhere, unquoted in config files)', () => {
+    for (const [line, file] of [
+        ['DB_PASSWORD=Xk9' + '#mQ2vL7pR4tZ8', '.env'],
+        ['client_secret: "' + alnum(20) + '"', 'src/app.ts'],
+        ['ACCESS_TOKEN=' + alnum(32), 'deploy/prod.env'],
+        ['refresh-token = \'' + alnum(24) + '\'', 'src/app.py'],
+        ['JWT_SECRET=4f9a8b7c' + '6d5e4f3a2b1c9d8e', '.env'],
+        ['{"token": "4f9a8b7c' + '6d5e4f3a2b1c"}', 'settings.json'],
+        ['secret: 4f9a8b7c' + '6d5e4f3a2b1c9d8e', 'app.yaml'],
+        ['DB_PASSWORD=correct' + 'horsebatterystaple', '.env'],
+        ['password: "Summer' + '2024!"', 'src/app.ts']
     ]) {
-        assert.strictEqual(found(line)[0]?.patternName, 'Secret Assignment', line);
+        assert.strictEqual(found(line, file)[0]?.patternName, 'Secret Assignment', `${file}: ${line}`);
     }
 });
 
-test('F15: ordinary code that mentions secret-named keys is not reported', () => {
-    for (const line of [
-        'const password = process.env.DB_PASSWORD;',
-        'password = os.environ["DB_PASSWORD"]',
-        'api_key = getApiKey(config)',
-        'PASSWORD_MIN_LENGTH=12',
-        'password: str',
-        'secret_key = settings.SECRET_KEY_FALLBACK',
-        'access_token = "${ACCESS_TOKEN}"',
-        'password = "changeme12345"'
+test('F15/N12: expressions and references assigned to secret-named keys are not reported', () => {
+    for (const [line, file] of [
+        ['const password = process.env.DB_PASSWORD;', 'a.js'],
+        ['password = os.environ["DB_PASSWORD"]', 'a.py'],
+        ['api_key = getApiKey(config)', 'a.py'],
+        ['PASSWORD_MIN_LENGTH=12', '.env'],
+        ['password: str', 'a.py'],
+        ['secret_key = settings.SECRET_KEY_FALLBACK', 'a.py'],
+        ['access_token = "${ACCESS_TOKEN}"', 'a.toml'],
+        ['password = "changeme12345"', 'a.py'],
+        ['const accessToken = generateAccessTokenV2(user);', 'a.js'],
+        ['password: hashPasswordSha256(input)', 'a.js'],
+        ['secretKey = decodeBase64Key2(buf)', 'a.py'],
+        ['const privateKey = loadPrivateKey2(keyPath)', 'a.js'],
+        ['auth_token: authTokenCache2[userId]', 'a.js'],
+        ['max_tokens: 4096', 'c.yaml'],
+        ['tokenizer: bert-base-uncased-v2', 'c.yaml'],
+        ['"description": "The access token is refreshed hourly"', 'a.json']
     ]) {
-        assert.deepStrictEqual(found(line), [], line);
+        assert.deepStrictEqual(found(line, file), [], `${file}: ${line}`);
     }
+});
+
+test('N11: a placeholder match does not hide a real key later on the same line', () => {
+    const line = 'const k = "AKIA' + 'IOSFODNN7EXAMPLE"; const real = "' + KEYS['AWS Access Key ID'] + '"';
+    assert.strictEqual(found(line)[0]?.patternName, 'AWS Access Key ID');
 });
 
 test('a placeholder word elsewhere on the line does not hide a real key', () => {
@@ -133,11 +151,18 @@ test('ref source scans the commit, not the working tree', () => {
     assert.strictEqual(run({ root: repo, source: { kind: 'ref', ref: 'HEAD' } }).ok, false);
 });
 
-test('binary files are skipped', () => {
+test('N13: a NUL byte or UTF-16 encoding does not hide a secret; binary noise is not reported', () => {
     const repo = tempRepo();
     writeFiles(repo, { 'blob.bin': Buffer.concat([Buffer.from([0, 1, 2]), Buffer.from(KEYS['GitHub Token'])]) });
     git(repo, 'add', '.');
-    assert.strictEqual(run({ root: repo }).ok, true);
+    assert.strictEqual(run({ root: repo }).ok, false);
+
+    assert.strictEqual(found(textOf(Buffer.from(`// \u0000\nconst key="${KEYS['AWS Access Key ID']}"`))).length, 1);
+    const utf16 = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(`key=${KEYS['AWS Access Key ID']}`, 'utf16le')]);
+    assert.strictEqual(found(textOf(utf16)).length, 1);
+
+    const noise = Buffer.from(Array.from({ length: 4096 }, (_, i) => (i * 7919) % 256));
+    assert.deepStrictEqual(found(textOf(noise)), []);
 });
 
 test('F1: a tracked symlink is read as its link text, never followed', { skip: process.platform === 'win32' && 'symlinks need developer mode' }, () => {
@@ -151,4 +176,25 @@ test('F1: a tracked symlink is read as its link text, never followed', { skip: p
     } finally {
         fs.rmSync(outside);
     }
+});
+
+const posixNames = process.platform === 'win32' && 'file name not allowed on Windows';
+
+test('N1: a file whose name contains a newline is scanned in every source', { skip: posixNames }, () => {
+    const repo = tempRepo();
+    writeFiles(repo, { 'odd\nname.txt': `TOKEN=${KEYS['GitHub Token']}\n` });
+    git(repo, 'add', '-A');
+    assert.strictEqual(run({ root: repo }).ok, false, 'worktree');
+    assert.strictEqual(run({ root: repo, source: { kind: 'index' } }).ok, false, 'index');
+    git(repo, 'commit', '-q', '-m', 'odd');
+    assert.strictEqual(run({ root: repo, source: { kind: 'ref', ref: 'HEAD' } }).ok, false, 'ref');
+});
+
+test('N2: a staged file named like an index stage ("0:...") is read by object id', { skip: posixNames }, () => {
+    const repo = tempRepo();
+    writeFiles(repo, { '0:leak.txt': `TOKEN=${KEYS['GitHub Token']}\n`, 'leak.txt': 'clean\n' });
+    git(repo, 'add', '-A');
+    const result = run({ root: repo, source: { kind: 'index' } });
+    assert.strictEqual(result.ok, false);
+    assert.match(result.report, /0:leak\.txt/);
 });

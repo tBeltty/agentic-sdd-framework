@@ -66,6 +66,8 @@ The specification is not complete until this command exits with code 0 and retur
 * **Manual Verification (If applicable):** Specific manual steps to observe expected behavior.
 * **Last Verified:** [recorded by sdd-verify --record]
 
+`sdd-verify --record` writes `Last Verified` with a hash over the result, the command, and the expected output. Do not edit it by hand: changing any of them reopens the spec until you record again.
+
 ---
 
 ## 5. Decision Rationale

@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { parseSpec, withLastVerified, withTaskEvidence } = require('../scripts/lib/spec');
+const { parseSpec, withLastVerified, withTaskEvidence, formatLastVerified } = require('../scripts/lib/spec');
 const { lintLiteSpec, parseVersion, versionAtLeast, MIN_AUDITKIT, run: checkSpec } = require('../scripts/check-spec');
 const { matchExpected, parseArgs, verify, recordTask } = require('../scripts/sdd-verify');
 const { tempRepo, git, writeFiles } = require('./helpers');
@@ -78,15 +78,69 @@ test('F53: a hand-written Last Verified is rejected even if it says PASS', () =>
     for (const value of ['PASS', 'FAIL, will PASS later', '2026-09-25 PASS (commit abc1234, exit 0)']) {
         const text = spec({ status: 'Completed', checked: ALL, evidence: { T1: 'x', T2: 'x', T3: 'x' }, lastVerified: value });
         assert.match(lint(text).join(), /not written by sdd-verify --record/, value);
+        assert.strictEqual(parseSpec(text).gate.lastVerifiedParsed, null, value);
     }
+});
+
+// A Completed spec whose Last Verified was written the way sdd-verify --record writes it.
+function completedWith({ state = '0123456789abcdef', result = 'PASS', exit = '0', command = 'npm test', expected = '3 passed' } = {}) {
+    const value = formatLastVerified({ date: '2026-09-25', result, commit: 'abc1234', exit, state }, command, expected);
+    return spec({ status: 'Completed', checked: ALL, evidence: { T1: 'x', T2: 'x', T3: 'x' }, command, expected, lastVerified: value });
+}
+
+test('F53: a recorded FAIL edited to PASS, or an edited exit code, is rejected', () => {
+    const failed = completedWith({ result: 'FAIL', exit: '1' });
+    for (const edited of [failed.replace(' FAIL (', ' PASS ('), failed.replace(' FAIL (', ' PASS (').replace('exit 1,', 'exit 0,')]) {
+        assert.match(lint(edited, { expectedState: '0123456789abcdef' }).join(), /edited after sdd-verify wrote it/);
+    }
+});
+
+test('N7: changing the verification command or expected output after recording reopens the spec', () => {
+    const done = completedWith();
+    assert.deepStrictEqual(lint(done, { expectedState: '0123456789abcdef' }), []);
+    const newCommand = done.replace('\n  npm test\n', '\n  true\n');
+    assert.notStrictEqual(newCommand, done, 'fixture must change the command');
+    assert.match(lint(newCommand, { expectedState: '0123456789abcdef' }).join(), /verification command or expected output changed/);
+    const newExpected = done.replace('\n  3 passed\n', '\n  /.*/\n');
+    assert.notStrictEqual(newExpected, done, 'fixture must change the expected output');
+    assert.match(lint(newExpected, { expectedState: '0123456789abcdef' }).join(), /verification command or expected output changed/);
+});
+
+test('N4: an edited exit code in recorded task evidence is rejected', () => {
+    const failing = withTaskEvidence(spec({ status: 'Draft' }), 'T1', { date: '2026-09-25', exit: '1', transcript: '$ npm test\n1 failed' });
+    assert.match(lint(failing.replace(', exit 1,', ', exit 0,')).join(), /edited after sdd-verify wrote it/);
+});
+
+test('N5: only one real Status line counts; comments, fences and template text do not', () => {
+    const draft = spec({ status: 'Draft', checked: ['T1'] });
+    const hidden = draft.replace('**Status:** Draft', '**Status:** Draft\n<!-- **Status:** Completed -->\n```\n**Status:** Completed\n```');
+    assert.strictEqual(parseSpec(hidden).status, 'draft');
+    assert.match(lint(draft.replace('**Status:** Draft', '**Status:** Draft\n**Status:** Completed')).join(), /Status/);
+    assert.match(lint(draft.replace('**Status:** Draft', '**Status:** Completed | Draft')).join(), /Unknown status/);
+});
+
+test('F52: a checked task inside a blockquote is still checked, and sdd-verify refuses to write into it', () => {
+    const text = spec({ status: 'Draft' }) + '\n> * [x] **T8:** Quoted task\n';
+    assert.match(lint(text).join(), /T8 is checked but has no evidence/);
+    assert.throws(() => withTaskEvidence(text, 'T8', { date: '2026-09-25', exit: '0', transcript: 'ok' }));
+});
+
+test('N15: recorded evidence containing backtick fences round-trips intact', () => {
+    const transcript = '$ cat notes.md\n```js\nconsole.log(1)\n```\n~~~~\nmore\n~~~~\ntail';
+    const recorded = withTaskEvidence(spec({ status: 'Draft' }), 'T1', { date: '2026-09-25', exit: '0', transcript });
+    const task = parseSpec(recorded).tasks[0];
+    assert.strictEqual(task.evidence.recorded.intact, true, 'the hash covers the whole transcript, inner fences included');
+    assert.strictEqual(parseSpec(recorded).tasks.length, 3);
+    assert.deepStrictEqual(lint(recorded), []);
+    assert.match(lint(recorded.replace('console.log(1)', 'console.log(2)')).join(), /edited after sdd-verify wrote it/);
 });
 
 test('completed requires every task checked, and a PASS matching the expected state', () => {
     const state = '0123456789abcdef';
-    const done = spec({ status: 'Completed', checked: ALL, evidence: { T1: 'x', T2: 'x', T3: 'x' }, lastVerified: `2026-09-25 PASS (commit abc1234, exit 0, state ${state})` });
+    const done = completedWith({ state });
     assert.deepStrictEqual(lint(done, { expectedState: state }), []);
     assert.match(lint(done, { expectedState: 'fedcba9876543210' }).join(), /does not match the content/);
-    const failed = done.replace('PASS (commit', 'FAIL (commit').replace('exit 0,', 'exit 1,');
+    const failed = completedWith({ state, result: 'FAIL', exit: '1' });
     assert.match(lint(failed, { expectedState: state }).join(), /last verification is FAIL/);
     assert.match(lint(spec({ status: 'Completed', checked: ['T1'], evidence: { T1: 'x' } })).join(), /T2 is not checked/);
 });
@@ -145,10 +199,10 @@ const quiet = () => {};
 const completedSpec = (command, expected = 'ok') =>
     spec({ status: 'Completed', checked: ALL, evidence: { T1: 'x', T2: 'x', T3: 'x' }, command, expected });
 
-test('F54: a PASS recorded and committed with the spec passes the gate', () => {
+test('F54: a PASS recorded and committed with the spec passes the gate', async () => {
     const repo = liteProject(completedSpec(`${NODE} -e "console.log('ok')"`));
     assert.strictEqual(checkSpec({ root: repo }).ok, false);
-    assert.strictEqual(verify({ root: repo, record: true, log: quiet, date: '2026-09-25' }).pass, true);
+    assert.strictEqual((await verify({ root: repo, record: true, log: quiet, date: '2026-09-25' })).pass, true);
     assert.strictEqual(checkSpec({ root: repo }).ok, true, 'uncommitted spec: compared with the working tree');
     git(repo, 'add', '-A');
     git(repo, 'commit', '-q', '-m', 'complete');
@@ -156,9 +210,9 @@ test('F54: a PASS recorded and committed with the spec passes the gate', () => {
     assert.strictEqual(checkSpec({ root: repo, source: { kind: 'ref', ref: 'HEAD' } }).ok, true);
 });
 
-test('F54: files changed after sdd-verify and committed with the spec invalidate the PASS', () => {
+test('F54: files changed after sdd-verify and committed with the spec invalidate the PASS', async () => {
     const repo = liteProject(completedSpec(`${NODE} -e "console.log('ok')"`));
-    verify({ root: repo, record: true, log: quiet, date: '2026-09-25' });
+    await verify({ root: repo, record: true, log: quiet, date: '2026-09-25' });
     writeFiles(repo, { 'src/app.txt': 'v2, never verified\n' });
     assert.match(checkSpec({ root: repo }).report, /does not match the content/);
     git(repo, 'add', '-A');
@@ -167,9 +221,9 @@ test('F54: files changed after sdd-verify and committed with the spec invalidate
     assert.match(checkSpec({ root: repo, source: { kind: 'ref', ref: 'HEAD' } }).report, /does not match the content/);
 });
 
-test('F54: a later commit that does not touch the spec does not reopen it', () => {
+test('F54: a later commit that does not touch the spec does not reopen it', async () => {
     const repo = liteProject(completedSpec(`${NODE} -e "console.log('ok')"`));
-    verify({ root: repo, record: true, log: quiet, date: '2026-09-25' });
+    await verify({ root: repo, record: true, log: quiet, date: '2026-09-25' });
     git(repo, 'add', '-A');
     git(repo, 'commit', '-q', '-m', 'complete');
     writeFiles(repo, { 'src/app.txt': 'v2, next feature\n' });
@@ -178,36 +232,57 @@ test('F54: a later commit that does not touch the spec does not reopen it', () =
     assert.strictEqual(checkSpec({ root: repo }).ok, true);
 });
 
-test('sdd-verify fails when the command modifies tracked files', () => {
+test('sdd-verify fails when the command modifies tracked files', async () => {
     const repo = liteProject(completedSpec(`${NODE} -e "require('fs').writeFileSync('src/app.txt','changed');console.log('ok')"`));
-    const result = verify({ root: repo, record: true, log: quiet, date: '2026-09-25' });
+    const result = await verify({ root: repo, record: true, log: quiet, date: '2026-09-25' });
     assert.strictEqual(result.modified, true);
     assert.strictEqual(result.pass, false);
     assert.match(fs.readFileSync(path.join(repo, 'docs/SPEC.md'), 'utf8'), /Last Verified:\*\* 2026-09-25 FAIL/);
 });
 
-test('sdd-verify fails on a non-zero exit or missing expected output', () => {
-    assert.strictEqual(verify({ root: liteProject(completedSpec(`${NODE} -e "process.exit(3)"`)), log: quiet }).exitCode, '3');
-    assert.deepStrictEqual(verify({ root: liteProject(completedSpec(`${NODE} -e "console.log('nope')"`)), log: quiet }).missing, ['ok']);
+test('sdd-verify fails on a non-zero exit or missing expected output', async () => {
+    assert.strictEqual((await verify({ root: liteProject(completedSpec(`${NODE} -e "process.exit(3)"`)), log: quiet })).exitCode, '3');
+    assert.deepStrictEqual((await verify({ root: liteProject(completedSpec(`${NODE} -e "console.log('nope')"`)), log: quiet })).missing, ['ok']);
 });
 
-test('F57: sdd-verify enforces specification.verifyTimeoutSeconds', () => {
+test('F57: sdd-verify enforces specification.verifyTimeoutSeconds', async () => {
     const repo = liteProject(completedSpec(`${NODE} -e "setTimeout(() => {}, 6000)"`), { verifyTimeoutSeconds: 1 });
-    assert.strictEqual(verify({ root: repo, log: quiet }).exitCode, 'timeout');
+    assert.strictEqual((await verify({ root: repo, log: quiet })).exitCode, 'timeout');
 });
 
-test('sdd-verify --task records real output as evidence and checks the box', () => {
+test('N6: sdd-verify --record refuses to run with untracked files', async () => {
+    const repo = liteProject(completedSpec(`${NODE} -e "console.log('ok')"`));
+    writeFiles(repo, { 'src/helper.txt': 'never committed\n' });
+    const before = fs.readFileSync(path.join(repo, 'docs/SPEC.md'), 'utf8');
+    await assert.rejects(() => verify({ root: repo, record: true, log: quiet }), /Untracked files[\s\S]*src\/helper\.txt/);
+    assert.strictEqual(fs.readFileSync(path.join(repo, 'docs/SPEC.md'), 'utf8'), before, 'nothing is recorded');
+    assert.strictEqual((await verify({ root: repo, log: quiet })).pass, true, 'a plain run still works');
+});
+
+test('F57: on timeout the whole process tree is killed, not only the shell', async () => {
+    const repo = liteProject(completedSpec(`${NODE} slow.js`), { verifyTimeoutSeconds: 1 });
+    writeFiles(repo, {
+        'slow.js': "require('child_process').spawn(process.execPath, ['-e', \"setTimeout(() => require('fs').writeFileSync('late.txt', 'x'), 2500)\"], { stdio: 'ignore' });\nsetTimeout(() => {}, 10000);\n"
+    });
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-q', '-m', 'slow');
+    assert.strictEqual((await verify({ root: repo, log: quiet })).exitCode, 'timeout');
+    await new Promise(resolve => setTimeout(resolve, 3500));
+    assert.ok(!fs.existsSync(path.join(repo, 'late.txt')), 'the grandchild process kept running after the timeout');
+});
+
+test('sdd-verify --task records real output as evidence and checks the box', async () => {
     const repo = liteProject(spec({ status: 'In Progress' }));
-    assert.strictEqual(recordTask({ root: repo, taskId: 'T2', command: `${NODE} -e "console.log('2 passed')"`, log: quiet, date: '2026-09-25' }).exitCode, '0');
+    assert.strictEqual((await recordTask({ root: repo, taskId: 'T2', command: `${NODE} -e "console.log('2 passed')"`, log: quiet, date: '2026-09-25' })).exitCode, '0');
     const task = parseSpec(fs.readFileSync(path.join(repo, 'docs/SPEC.md'), 'utf8')).tasks.find(t => t.id === 'T2');
     assert.strictEqual(task.checked, true);
     assert.strictEqual(task.evidence.recorded.intact, true);
     assert.match(task.evidence.text, /2 passed/);
-    assert.throws(() => recordTask({ root: repo, taskId: 'T9', command: 'echo', log: quiet }), /Task T9 not found/);
+    await assert.rejects(() => recordTask({ root: repo, taskId: 'T9', command: 'echo', log: quiet }), /Task T9 not found/);
 });
 
-test('sdd-verify refuses placeholder commands', () => {
-    assert.throws(() => verify({ root: liteProject(TEMPLATE), log: quiet }), /verification command is still a placeholder/);
+test('sdd-verify refuses placeholder commands', async () => {
+    await assert.rejects(() => verify({ root: liteProject(TEMPLATE), log: quiet }), /verification command is still a placeholder/);
 });
 
 test('a missing lite spec fails the gate; the framework repository is exempt', () => {
@@ -216,13 +291,16 @@ test('a missing lite spec fails the gate; the framework repository is exempt', (
     git(repo, 'add', '-A');
     assert.match(checkSpec({ root: repo }).report, /docs\/SPEC\.md not found/);
     writeFiles(repo, { 'sdd.config.json': JSON.stringify({ project: { type: 'framework' } }) });
+    assert.strictEqual(checkSpec({ root: repo }).ok, false, 'N8: project.type alone does not exempt a project');
+    writeFiles(repo, { 'package.json': JSON.stringify({ name: 'agentic-sdd-framework' }) });
     assert.strictEqual(checkSpec({ root: repo }).ok, true);
 });
 
 test('F75: auditkit version comparison', () => {
     assert.deepStrictEqual(parseVersion('auditkit 0.3.0\n'), [0, 3, 0]);
     assert.strictEqual(versionAtLeast([0, 2, 9], MIN_AUDITKIT), false);
-    assert.strictEqual(versionAtLeast([0, 3, 0], MIN_AUDITKIT), true);
+    assert.strictEqual(versionAtLeast([0, 3, 0], MIN_AUDITKIT), false);
+    assert.strictEqual(versionAtLeast([0, 3, 1], MIN_AUDITKIT), true);
     assert.strictEqual(versionAtLeast([1, 0, 0], MIN_AUDITKIT), true);
 });
 
@@ -262,10 +340,10 @@ test('rigor mode reports a missing auditkit with install instructions', () => {
 
 test('F75: rigor mode rejects an auditkit older than the minimum', { skip: process.platform === 'win32' && 'uses a shell-script stub' }, () => {
     const stub = path.join(tempRepo(), 'auditkit');
-    fs.writeFileSync(stub, '#!/bin/sh\necho "auditkit 0.2.0"\n', { mode: 0o755 });
+    fs.writeFileSync(stub, '#!/bin/sh\necho "auditkit 0.3.0"\n', { mode: 0o755 });
     const result = withAuditkit(stub, () => checkSpec({ root: rigorProject() }));
     assert.strictEqual(result.ok, false);
-    assert.match(result.report, /older than 0\.3\.0/);
+    assert.match(result.report, /older than 0\.3\.1/);
 });
 
 test('rigor mode passes fresh templates and rejects DONE without evidence', { skip: !hasAuditkit && 'auditkit not installed' }, () => {

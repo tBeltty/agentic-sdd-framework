@@ -23,11 +23,12 @@ const PROSE_EXTENSIONS = ['.md', '.mdx', '.txt'];
 
 // The skill that defines the banned patterns must quote them; vendored skills and the
 // Rigor templates are synced from their upstream repositories and linted there. Rigor
-// documents are records in the protocol's format and hold pasted command output.
+// documents (specification.roadmapDir) are records in the protocol's format and hold
+// pasted command output.
 const DEFAULT_EXCLUDE = [
     '.agents/skills/no-ai-slop/',
     '.agents/skills/auditor-executor-protocol/',
-    'docs/roadmap/'
+    'docs/roadmap/templates/'
 ];
 
 function lintContent(content, { maxEmDashes = 1 } = {}) {
@@ -78,7 +79,8 @@ function run({ root, source = WORKTREE } = {}) {
     if (getIn(config, 'capabilities.noAiSlop.enabled', true) === false) {
         return { ok: true, report: '⏭️  No-AI-Slop linter disabled in sdd.config.json.' };
     }
-    const exclude = [...DEFAULT_EXCLUDE, ...getIn(config, 'capabilities.noAiSlop.exclude', [])];
+    const roadmapDir = `${getIn(config, 'specification.roadmapDir', 'docs/roadmap').replace(/\/+$/, '')}/`;
+    const exclude = [...DEFAULT_EXCLUDE, roadmapDir, ...getIn(config, 'capabilities.noAiSlop.exclude', [])];
     const maxEmDashes = getIn(config, 'capabilities.noAiSlop.maxEmDashes', 1);
 
     const files = listFiles(root, source)

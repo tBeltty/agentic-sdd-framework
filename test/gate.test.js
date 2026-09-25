@@ -7,7 +7,7 @@ const { runChecks, runPush } = require('../scripts/quality-gate');
 const { install } = require('../scripts/install-git-hooks');
 const { validateConfig, loadConfig } = require('../scripts/lib/config');
 const { collectChecks } = require('../scripts/check-system-prerequisites');
-const { tempDir, tempRepo, git, writeFiles } = require('./helpers');
+const { tempDir, tempRepo, git, writeFiles, runHook } = require('./helpers');
 
 const GATE = path.join(__dirname, '../scripts/quality-gate.js');
 const quiet = () => {};
@@ -61,7 +61,7 @@ test('F6: a UTF-8 BOM in sdd.config.json is accepted', () => {
 
 function pushRepo() {
     const repo = tempRepo();
-    writeFiles(repo, { 'sdd.config.json': FRAMEWORK_CONFIG, 'package.json': '{"version": "1.0.0"}\n', 'README.md': '# app\n' });
+    writeFiles(repo, { 'sdd.config.json': FRAMEWORK_CONFIG, 'package.json': '{"name": "agentic-sdd-framework", "version": "1.0.0"}\n', 'README.md': '# app\n' });
     git(repo, 'add', '-A');
     git(repo, 'commit', '-q', '-m', 'base');
     return repo;
@@ -93,6 +93,41 @@ test('F38: a secret added and removed in the pushed history is still caught', ()
     assert.deepStrictEqual(runPush({ root: repo, input: `refs/heads/x ${'0'.repeat(40)} refs/heads/x ${base}\n`, remoteName: 'origin', log: quiet }), []);
 });
 
+test('N3: a secret introduced only by a merge commit is caught', () => {
+    const repo = pushRepo();
+    const base = git(repo, 'rev-parse', 'HEAD').trim();
+    git(repo, 'checkout', '-q', '-b', 'side');
+    writeFiles(repo, { 'side.txt': 'side\n' });
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-q', '-m', 'side');
+    git(repo, 'checkout', '-q', '-');
+    writeFiles(repo, { 'main.txt': 'main\n' });
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-q', '-m', 'main');
+    git(repo, 'merge', '-q', '--no-ff', '--no-commit', 'side');
+    writeFiles(repo, { 'merge.txt': `k=${TOKEN}\n` });
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-q', '-m', 'merge');
+    git(repo, 'rm', '-q', 'merge.txt');
+    git(repo, 'commit', '-q', '-m', 'remove');
+    const failed = runPush({ root: repo, input: pushLine(repo, base), remoteName: 'origin', log: quiet });
+    assert.deepStrictEqual(failed, ['Secrets in pushed history [refs/heads/main]']);
+});
+
+test('N14/N17: inherited object keys and empty paths are rejected by the config schema', () => {
+    const errors = validateConfig({
+        toString: 'x',
+        project: { constructor: 'x' },
+        specification: { specFile: '', roadmapDir: '' },
+        security: { allowFiles: [''] }
+    }).join('\n');
+    assert.match(errors, /toString: unknown key/);
+    assert.match(errors, /project\.constructor: unknown key/);
+    assert.match(errors, /specification\.specFile/);
+    assert.match(errors, /specification\.roadmapDir/);
+    assert.match(errors, /security\.allowFiles/);
+});
+
 test('a ref whose commit is already on the remote is not re-checked (tags on published commits)', () => {
     const repo = pushRepo();
     writeFiles(repo, { 'notes.md': 'A robust plan.\n' }); // violates the current prose rules
@@ -116,7 +151,7 @@ test('a ref whose commit is already on the remote is not re-checked (tags on pub
     assert.deepStrictEqual(failedNew, ['No-AI-Slop Copy Linter [refs/heads/main]']);
 });
 
-test('F38/F37: the installed hook feeds the push to the gate and falls back to an absolute node path', { skip: process.platform === 'win32' && 'runs the sh hook directly' }, () => {
+test('F38/F37: the installed hook feeds the push to the gate and falls back to an absolute node path', () => {
     const repo = pushRepo();
     const base = git(repo, 'rev-parse', 'HEAD').trim();
     const { hookPath } = install({ root: repo, gateScript: GATE });
@@ -128,9 +163,12 @@ test('F38/F37: the installed hook feeds the push to the gate and falls back to a
     git(repo, 'add', '-A');
     git(repo, 'commit', '-q', '-m', 'leak');
     writeFiles(repo, { 'cfg.txt': 'k=removed\n' });
-    const run = input => spawnSync(hookPath, ['origin', 'url'], { cwd: repo, input, encoding: 'utf8', env: { ...process.env, PATH: '/usr/bin:/bin' } });
+    // Without node on PATH the hook must fall back to the absolute path (POSIX only: on
+    // Windows, PATH also has to keep sh and git reachable).
+    const env = process.platform === 'win32' ? process.env : { ...process.env, PATH: '/usr/bin:/bin' };
+    const run = input => runHook(hookPath, ['origin', 'url'], { cwd: repo, input, env });
     const blocked = run(pushLine(repo, base));
-    assert.strictEqual(blocked.status, 1, 'secret in the pushed commit blocks the push even without node on PATH');
+    assert.strictEqual(blocked.status, 1, blocked.stdout + blocked.stderr);
     assert.match(blocked.stderr, /Quality gate failed: Secret Leak Scanner \[refs\/heads\/main\], Secrets in pushed history/);
     const clean = run(`refs/heads/main ${base} refs/heads/main ${base}\n`);
     assert.strictEqual(clean.status, 0, clean.stdout + clean.stderr);

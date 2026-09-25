@@ -32,7 +32,7 @@ const { parseSpec } = require('./lib/spec');
 const { stateOf, referenceSourceFor } = require('./lib/state');
 
 const AUDITKIT_INSTALL = 'pipx install git+https://github.com/tBeltty/auditor-executor-protocol';
-const MIN_AUDITKIT = [0, 3, 0];
+const MIN_AUDITKIT = [0, 3, 1];
 
 function lintLiteSpec(text, { requireRecordedEvidence = false, expectedState = null } = {}) {
     const spec = parseSpec(text);
@@ -74,6 +74,8 @@ function lintLiteSpec(text, { requireRecordedEvidence = false, expectedState = n
         const last = spec.gate && spec.gate.lastVerifiedParsed;
         if (!last) {
             problems.push('Status is "completed" but "Last Verified" is missing or was not written by sdd-verify --record.');
+        } else if (!last.intact) {
+            problems.push('"Last Verified" was edited after sdd-verify wrote it, or the verification command or expected output changed since. Run sdd-verify --record.');
         } else if (last.result !== 'PASS' || last.exit !== '0') {
             problems.push(`Status is "completed" but the last verification is ${last.result} (exit ${last.exit}). Fix it and run sdd-verify --record.`);
         } else if (expectedState && last.state !== expectedState) {
@@ -136,9 +138,22 @@ function runAuditkit(root, roadmapDir, source) {
     }
 }
 
+// The framework's own repository has no project specification. The exemption requires both
+// project.type "framework" and the framework's package name, so it cannot be used as a
+// switch to turn the specification check off in a project.
+function isFrameworkRepository(root, source, config) {
+    if (getIn(config, 'project.type', 'application') !== 'framework') return false;
+    const pkg = readFile(root, 'package.json', source);
+    try {
+        return Boolean(pkg) && JSON.parse(pkg.toString('utf8')).name === 'agentic-sdd-framework';
+    } catch {
+        return false;
+    }
+}
+
 function run({ root, source = WORKTREE } = {}) {
     const config = loadConfig(root, source);
-    if (getIn(config, 'project.type', 'application') === 'framework') {
+    if (isFrameworkRepository(root, source, config)) {
         return { ok: true, report: '⏭️  Not applicable (the framework repository has no project specification).' };
     }
 

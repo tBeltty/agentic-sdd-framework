@@ -78,10 +78,11 @@ function newCommits(root, { localSha, remoteSha }, remoteName) {
     throw new Error(`Cannot list the commits being pushed for ${localSha.slice(0, 12)}.`);
 }
 
+// Files a commit adds or changes. `-m` makes merge commits report their changes against
+// every parent, so content introduced by the merge itself is scanned too.
 function changedFiles(root, commit) {
-    return git(['diff-tree', '--no-commit-id', '-r', '-z', '--name-only', '--diff-filter=ACMR', '--root', commit], root)
-        .split('\0')
-        .filter(Boolean);
+    const names = git(['diff-tree', '--no-commit-id', '-r', '-m', '-z', '--name-only', '--diff-filter=ACMR', '--root', commit], root);
+    return [...new Set(names.split('\0').filter(Boolean))];
 }
 
 function runPush({ root, input, remoteName, log }) {

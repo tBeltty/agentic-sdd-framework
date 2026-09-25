@@ -254,14 +254,17 @@ function provision(rawAnswers, { target = process.cwd(), force = false, log = co
     // 3. Governance documents.
     createFromTemplate('.agents/AGENTS.template.md', '.agents/AGENTS.md');
     createFromTemplate('.agents/CONTEXT.template.md', '.agents/CONTEXT.md', t => fillContext(t, answers, config));
+    // Documents go where the config says, so the gate checks the files sdd-init created.
+    const specFile = getIn(config, 'specification.specFile', 'docs/SPEC.md');
+    const roadmapDir = getIn(config, 'specification.roadmapDir', 'docs/roadmap');
     if (answers.specMode === 'lite') {
-        createFromTemplate('docs/SPEC_TEMPLATE.md', 'docs/SPEC.md');
+        createFromTemplate('docs/SPEC_TEMPLATE.md', specFile);
     } else {
         for (const doc of RIGOR_DOCS) {
-            createFromTemplate(`docs/roadmap/templates/${doc}.md`, `docs/roadmap/${doc}.md`,
+            createFromTemplate(`docs/roadmap/templates/${doc}.md`, `${roadmapDir}/${doc}.md`,
                 t => replaceLiteral(t, '{{PROJECT_NAME}}', answers.projectName));
         }
-        if (!fs.existsSync(at('docs/roadmap/annexes/.gitkeep'))) write('docs/roadmap/annexes/.gitkeep', '');
+        if (!fs.existsSync(at(`${roadmapDir}/annexes/.gitkeep`))) write(`${roadmapDir}/annexes/.gitkeep`, '');
     }
     createFromTemplate('docs/decisions/ADR_TEMPLATE.md', 'docs/decisions/ADR-0001-stack-and-architecture.md',
         t => fillAdr(t, answers, today));

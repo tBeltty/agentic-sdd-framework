@@ -3,62 +3,144 @@
   "title": "Agentic SDD Framework configuration (sdd.config.json)",
   "type": "object",
   "additionalProperties": false,
-  "patternProperties": { "^x-": {} },
+  "patternProperties": {
+    "^x-": {}
+  },
   "properties": {
-    "$schema": { "type": "string" },
-    "version": { "type": "string", "description": "Framework version that generated this file." },
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string",
+      "description": "Framework version that generated this file."
+    },
     "project": {
       "type": "object",
       "additionalProperties": false,
-      "patternProperties": { "^x-": {} },
+      "patternProperties": {
+        "^x-": {}
+      },
       "properties": {
-        "name": { "type": "string" },
-        "type": { "enum": ["application", "framework"] },
-        "runtime": { "type": "string" }
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "application",
+            "framework"
+          ]
+        },
+        "runtime": {
+          "type": "string"
+        }
       }
     },
     "specification": {
       "type": "object",
       "additionalProperties": false,
-      "patternProperties": { "^x-": {} },
+      "patternProperties": {
+        "^x-": {}
+      },
       "properties": {
-        "mode": { "enum": ["lite", "rigor"] },
-        "allowedModes": { "type": "array", "items": { "enum": ["lite", "rigor"] } },
-        "specFile": { "type": "string", "x-relative-path": true, "description": "Lite spec path (default docs/SPEC.md)." },
-        "roadmapDir": { "type": "string", "x-relative-path": true, "description": "Rigor document directory (default docs/roadmap)." },
-        "verifyTimeoutSeconds": { "type": "integer", "minimum": 1, "description": "sdd-verify limit per command (default 900)." },
-        "verifyShell": { "type": "string", "description": "Shell for sdd-verify commands (default: sh on macOS/Linux, cmd.exe on Windows)." },
-        "requireRecordedEvidence": { "type": "boolean", "description": "Reject checked tasks whose evidence was not recorded by sdd-verify --task (default false)." }
+        "mode": {
+          "enum": [
+            "lite",
+            "rigor"
+          ]
+        },
+        "allowedModes": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "lite",
+              "rigor"
+            ]
+          }
+        },
+        "specFile": {
+          "type": "string",
+          "x-relative-path": true,
+          "description": "Lite spec path (default docs/SPEC.md).",
+          "minLength": 1
+        },
+        "roadmapDir": {
+          "type": "string",
+          "x-relative-path": true,
+          "description": "Rigor document directory (default docs/roadmap).",
+          "minLength": 1
+        },
+        "verifyTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "sdd-verify limit per command (default 900)."
+        },
+        "verifyShell": {
+          "type": "string",
+          "description": "Shell for sdd-verify commands (default: sh on macOS/Linux, cmd.exe on Windows)."
+        },
+        "requireRecordedEvidence": {
+          "type": "boolean",
+          "description": "Reject checked tasks whose evidence was not recorded by sdd-verify --task (default false)."
+        }
       }
     },
     "discovery": {
       "type": "object",
       "additionalProperties": false,
-      "patternProperties": { "^x-": {} },
+      "patternProperties": {
+        "^x-": {}
+      },
       "properties": {
-        "concurrency": { "type": "string" },
-        "hardware": { "type": "string" },
-        "workload": { "type": "string" }
+        "concurrency": {
+          "type": "string"
+        },
+        "hardware": {
+          "type": "string"
+        },
+        "workload": {
+          "type": "string"
+        }
       }
     },
     "architecture": {
       "type": "object",
       "additionalProperties": false,
-      "patternProperties": { "^x-": {} },
+      "patternProperties": {
+        "^x-": {}
+      },
       "properties": {
-        "style": { "type": "string" },
-        "maxLocPerFile": { "type": "integer", "minimum": 0, "description": "0 disables the check (default 400)." },
-        "maxLocExclude": { "type": "array", "items": { "type": "string", "x-relative-path": true } }
+        "style": {
+          "type": "string"
+        },
+        "maxLocPerFile": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0 disables the check (default 400)."
+        },
+        "maxLocExclude": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "x-relative-path": true,
+            "minLength": 1
+          }
+        }
       }
     },
     "security": {
       "type": "object",
       "additionalProperties": false,
-      "patternProperties": { "^x-": {} },
+      "patternProperties": {
+        "^x-": {}
+      },
       "properties": {
         "allowFiles": {
           "type": "array",
-          "items": { "type": "string", "x-relative-path": true },
+          "items": {
+            "type": "string",
+            "x-relative-path": true,
+            "minLength": 1
+          },
           "description": "Tracked paths allowed despite a sensitive name (.env, *.key, ...)."
         }
       }
@@ -66,31 +148,62 @@
     "capabilities": {
       "type": "object",
       "additionalProperties": false,
-      "patternProperties": { "^x-": {} },
+      "patternProperties": {
+        "^x-": {}
+      },
       "properties": {
         "astNavigation": {
           "type": "object",
           "additionalProperties": false,
-          "properties": { "adapter": { "enum": ["ast-grep", "graphify", "ripgrep", "lsp"] } }
+          "properties": {
+            "adapter": {
+              "enum": [
+                "ast-grep",
+                "graphify",
+                "ripgrep",
+                "lsp"
+              ]
+            }
+          }
         },
         "noAiSlop": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "enabled": { "type": "boolean" },
-            "exclude": { "type": "array", "items": { "type": "string", "x-relative-path": true } },
-            "maxEmDashes": { "type": "integer", "minimum": 0 }
+            "enabled": {
+              "type": "boolean"
+            },
+            "exclude": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "x-relative-path": true,
+                "minLength": 1
+              }
+            },
+            "maxEmDashes": {
+              "type": "integer",
+              "minimum": 0
+            }
           }
         },
         "i18n": {
           "type": "object",
           "additionalProperties": false,
-          "properties": { "enabled": { "type": "boolean" } }
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
         },
         "pwa": {
           "type": "object",
           "additionalProperties": false,
-          "properties": { "enabled": { "type": "boolean" } }
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
         }
       }
     }

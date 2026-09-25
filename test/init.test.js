@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { tempDir, tempRepo, git, writeFiles } = require('./helpers');
+const { tempDir, tempRepo, git, writeFiles, runHook } = require('./helpers');
 
 const FRAMEWORK_ROOT = path.resolve(__dirname, '..');
 const INIT = path.join(FRAMEWORK_ROOT, 'scripts/sdd-init.js');
@@ -88,7 +88,7 @@ test('invalid flags fail loudly instead of silently defaulting', () => {
     assert.throws(() => init(project, '--ast=grep'), /Unknown AST adapter "grep"/);
 });
 
-test('pre-push hook works in linked worktrees and chains an existing hook', { skip: process.platform === 'win32' && 'runs the sh hook directly' }, () => {
+test('pre-push hook works in linked worktrees and chains an existing hook', () => {
     const project = tempRepo();
     writeFiles(project, { 'README.md': '# app\n' });
     git(project, 'add', '-A');
@@ -107,7 +107,9 @@ test('pre-push hook works in linked worktrees and chains an existing hook', { sk
     git(worktree, 'commit', '-q', '-m', 'provision');
     const sha = git(worktree, 'rev-parse', 'HEAD').trim();
     const input = `refs/heads/wt ${sha} refs/heads/wt ${'0'.repeat(40)}\n`;
-    const output = execFileSync(hookPath, ['origin'], { cwd: worktree, input, encoding: 'utf8' });
+    const result = runHook(hookPath, ['origin'], { cwd: worktree, input });
+    assert.strictEqual(result.status, 0, result.stdout + result.stderr);
+    const output = result.stdout;
     assert.match(output, /previous-hook-ran/);
     assert.match(output, /Specification Check ---\n✅ docs\/SPEC\.md/);
     assert.match(output, /No secrets added by the \d+ commit\(s\) being pushed/);
@@ -187,4 +189,35 @@ test('F60: --force refreshes copied .claude/skills directories', () => {
     fs.writeFileSync(path.join(own, 'SKILL.md'), 'my own skill');
     init(project, '--force');
     assert.strictEqual(fs.readFileSync(path.join(own, 'SKILL.md'), 'utf8'), 'my own skill');
+});
+
+test('N9: re-running sdd-init keeps the answers stored in sdd.config.json; explicit flags win', () => {
+    const project = tempRepo();
+    init(project, '--name=shop', '--runtime=go-1.23', '--mode=rigor', '--ast=ripgrep', '--hardware=serverless', '--i18n');
+    init(project);
+    let config = JSON.parse(read(project, 'sdd.config.json'));
+    assert.deepStrictEqual(
+        [config.project.name, config.project.runtime, config.specification.mode, config.capabilities.astNavigation.adapter, config.discovery.hardware, config.capabilities.i18n.enabled],
+        ['shop', 'go-1.23', 'rigor', 'ripgrep', 'serverless', true]
+    );
+    init(project, '--runtime=python-3.12');
+    config = JSON.parse(read(project, 'sdd.config.json'));
+    assert.deepStrictEqual([config.project.name, config.project.runtime], ['shop', 'python-3.12']);
+});
+
+test('N10: the spec and Rigor documents are created at the configured paths', () => {
+    const lite = tempRepo();
+    writeFiles(lite, { 'sdd.config.json': JSON.stringify({ specification: { specFile: 'specs/CURRENT.md' } }) });
+    init(lite);
+    assert.ok(exists(lite, 'specs/CURRENT.md'));
+    assert.ok(!exists(lite, 'docs/SPEC.md'));
+    execFileSync(process.execPath, ['.sdd/scripts/check-spec.js'], { cwd: lite, stdio: 'pipe' });
+
+    const rigor = tempRepo();
+    writeFiles(rigor, { 'sdd.config.json': JSON.stringify({ specification: { roadmapDir: 'plans' } }) });
+    init(rigor, '--mode=rigor');
+    for (const doc of ['plan-of-record.md', 'execution-guide.md', 'compliance-log.md', 'annexes/.gitkeep']) {
+        assert.ok(exists(rigor, `plans/${doc}`), doc);
+    }
+    assert.ok(!exists(rigor, 'docs/roadmap/execution-guide.md'));
 });

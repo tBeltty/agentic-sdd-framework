@@ -9,7 +9,7 @@
  *       Runs the "Verification Gate" command. Passes when it exits 0, every non-empty
  *       expected line appears in its output (a /.../ line is a regular expression), and it
  *       did not modify tracked files. --record writes
- *       "Last Verified: <date> PASS|FAIL (commit <sha>, exit <code>, state <fingerprint>)"
+ *       "Last Verified: <date> PASS|FAIL (commit <sha>, exit <code>, state <fingerprint>, check <hash>)"
  *       into the spec; the gate compares that fingerprint with the committed content.
  *
  *   node scripts/sdd-verify.js --task <ID> -- <command ...>
@@ -23,9 +23,9 @@
 
 const fs = require('fs');
 const path = require('path');
-const { repoRoot, WORKTREE } = require('./lib/git');
+const { git, repoRoot, WORKTREE } = require('./lib/git');
 const { loadConfig, getIn } = require('./lib/config');
-const { parseSpec, withLastVerified, withTaskEvidence } = require('./lib/spec');
+const { parseSpec, formatLastVerified, withLastVerified, withTaskEvidence } = require('./lib/spec');
 const { stateOf, currentCommit } = require('./lib/state');
 const { DEFAULT_TIMEOUT_SECONDS, runCommand, joinCommand } = require('./lib/runner');
 
@@ -64,16 +64,27 @@ function today(date) {
     return date || new Date().toISOString().slice(0, 10);
 }
 
-function verify({ root = repoRoot(), record = false, log = console.log, date } = {}) {
+// Untracked files take part in the verification but not in the recorded state fingerprint,
+// so a recorded PASS could depend on files that are never committed.
+function untrackedFiles(root) {
+    return git(['ls-files', '--others', '--exclude-standard', '-z'], root).split('\0').filter(Boolean);
+}
+
+async function verify({ root = repoRoot(), record = false, log = console.log, date } = {}) {
     const { specFile, specPath, text, runOptions } = loadLiteSpec(root);
     const { gate } = parseSpec(text);
     if (!gate) throw new Error(`${specFile} has no "Verification Gate" section.`);
     if (!gate.command) throw new Error(`${specFile}: the verification command is still a placeholder.`);
     if (!gate.expected) throw new Error(`${specFile}: the expected output is still a placeholder.`);
+    const untracked = untrackedFiles(root);
+    if (record && untracked.length > 0) {
+        throw new Error(`Untracked files would take part in the verification but not in the recorded state: ${untracked.slice(0, 5).join(', ')}${untracked.length > 5 ? ', ...' : ''}. Commit, ignore, or remove them, then record again.`);
+    }
+    if (untracked.length > 0) log(`⚠️  ${untracked.length} untracked file(s) take part in this run; --record refuses to run until they are committed, ignored, or removed.`);
 
     const before = stateOf(root, WORKTREE, specFile);
     log(`$ ${gate.command}\n`);
-    const { exit, output } = runCommand(gate.command, runOptions);
+    const { exit, output } = await runCommand(gate.command, runOptions);
     log(output.trimEnd());
     const after = stateOf(root, WORKTREE, specFile);
 
@@ -88,20 +99,21 @@ function verify({ root = repoRoot(), record = false, log = console.log, date } =
     if (pass) log('✅ Verification gate passed.');
 
     if (record) {
-        const value = `${today(date)} ${pass ? 'PASS' : 'FAIL'} (commit ${currentCommit(root)}, exit ${exit}, state ${before})`;
+        const fields = { date: today(date), result: pass ? 'PASS' : 'FAIL', commit: currentCommit(root), exit, state: before };
+        const value = formatLastVerified(fields, gate.command, gate.expected);
         fs.writeFileSync(specPath, withLastVerified(text, value));
         log(`📝 Recorded in ${specFile}: Last Verified ${value}`);
     }
     return { pass, exitCode: exit, missing, modified };
 }
 
-function recordTask({ root = repoRoot(), taskId, command, log = console.log, date } = {}) {
+async function recordTask({ root = repoRoot(), taskId, command, log = console.log, date } = {}) {
     const { specFile, specPath, text, runOptions } = loadLiteSpec(root);
     if (!parseSpec(text).tasks.some(t => t.id === taskId)) {
         throw new Error(`Task ${taskId} not found in ${specFile}.`);
     }
     log(`$ ${command}\n`);
-    const { exit, output } = runCommand(command, runOptions);
+    const { exit, output } = await runCommand(command, runOptions);
     log(output.trimEnd());
 
     let lines = output.replace(/\r\n?/g, '\n').replace(/\s+$/, '').split('\n');
@@ -139,19 +151,23 @@ function parseArgs(argv) {
     return options;
 }
 
-if (require.main === module) {
+async function main(argv) {
     try {
-        const options = parseArgs(process.argv.slice(2));
+        const options = parseArgs(argv);
         if (options.taskId) {
-            const { exitCode } = recordTask({ taskId: options.taskId, command: options.command });
-            process.exit(exitCode === '0' ? 0 : 1);
+            const { exitCode } = await recordTask({ taskId: options.taskId, command: options.command });
+            return exitCode === '0' ? 0 : 1;
         }
-        const { pass } = verify({ record: options.record });
-        process.exit(pass ? 0 : 1);
+        const { pass } = await verify({ record: options.record });
+        return pass ? 0 : 1;
     } catch (error) {
         console.error(`❌ ${error.message}`);
-        process.exit(2);
+        return 2;
     }
+}
+
+if (require.main === module) {
+    main(process.argv.slice(2)).then(code => process.exit(code));
 }
 
 module.exports = { matchExpected, parseArgs, verify, recordTask };

@@ -48,34 +48,54 @@ function describeSource(source = WORKTREE) {
     return 'working tree';
 }
 
-function parseEntries(output) {
-    // "<mode> <type-or-sha> <sha-or-stage>\t<path>" records, NUL-terminated.
-    return output.split('\0').filter(Boolean).map(record => {
+// Parses `ls-files -s -z` ("<mode> <oid> <stage>\t<path>") or `ls-tree -r -z`
+// ("<mode> <type> <oid>\t<path>") output. Paths may contain any byte except NUL.
+function parseEntries(output, format) {
+    const entries = [];
+    for (const record of output.split('\0')) {
+        if (!record) continue;
         const tab = record.indexOf('\t');
-        const [mode] = record.slice(0, tab).split(' ');
-        return { mode, path: record.slice(tab + 1) };
-    });
+        const fields = record.slice(0, tab).split(' ');
+        const entry = format === 'ls-tree'
+            ? { mode: fields[0], oid: fields[2], stage: '0', path: record.slice(tab + 1) }
+            : { mode: fields[0], oid: fields[1], stage: fields[2], path: record.slice(tab + 1) };
+        if (entry.mode !== GITLINK_MODE) entries.push(entry);
+    }
+    return entries;
+}
+
+// Path -> blob id for every tracked file in an index or commit source. During a merge
+// conflict the index holds several stages; stage 0 wins, otherwise "ours" (stage 2).
+function entriesOf(root, source) {
+    let entries;
+    try {
+        entries = source.kind === 'ref'
+            ? parseEntries(git(['ls-tree', '-r', '-z', source.ref], root), 'ls-tree')
+            : parseEntries(git(['ls-files', '-s', '-z'], root), 'ls-files');
+    } catch (error) {
+        throw new Error(`Cannot list files from the ${describeSource(source)}: ${describeGitError(error)}`);
+    }
+    const byPath = new Map();
+    for (const entry of entries) {
+        const current = byPath.get(entry.path);
+        if (!current || entry.stage === '0' || (current.stage !== '0' && entry.stage === '2')) byPath.set(entry.path, entry);
+    }
+    return byPath;
 }
 
 // Files a check should look at. Submodule entries (gitlinks) are not files and are skipped.
 // For the index, only files the next commit changes; use listTrackedFiles for all of them.
 function listFiles(root, source = WORKTREE, { changedOnly = true } = {}) {
-    let entries;
+    const paths = [...entriesOf(root, source).keys()];
+    if (source.kind !== 'index' || !changedOnly) return paths;
+    let names;
     try {
-        if (source.kind === 'index' && changedOnly) {
-            // Only what this commit changes: added, copied, modified, renamed.
-            const names = git(['diff', '--cached', '--name-only', '-z', '--diff-filter=ACMR'], root);
-            const staged = new Set(names.split('\0').filter(Boolean));
-            entries = parseEntries(git(['ls-files', '-s', '-z'], root)).filter(e => staged.has(e.path));
-        } else if (source.kind === 'ref') {
-            entries = parseEntries(git(['ls-tree', '-r', '-z', source.ref], root));
-        } else {
-            entries = parseEntries(git(['ls-files', '-s', '-z'], root));
-        }
+        names = git(['diff', '--cached', '--name-only', '-z', '--diff-filter=ACMR'], root);
     } catch (error) {
-        throw new Error(`Cannot list files from the ${describeSource(source)}: ${describeGitError(error)}`);
+        throw new Error(`Cannot list staged changes: ${describeGitError(error)}`);
     }
-    return [...new Set(entries.filter(e => e.mode !== GITLINK_MODE).map(e => e.path))];
+    const staged = new Set(names.split('\0').filter(Boolean));
+    return paths.filter(p => staged.has(p));
 }
 
 // Every tracked file in the source (for the index: the full staged tree).
@@ -102,27 +122,29 @@ function readWorktreeFile(root, file) {
     }
 }
 
-// Reads many objects in one `git cat-file --batch` process. Returns Map<file, Buffer|null>.
-function readObjects(root, specs) {
+// Reads blobs by object id in one `git cat-file --batch` process. Object ids never contain
+// newlines, so arbitrary file names cannot desynchronize the batch; every response is
+// checked against the id that was requested.
+function readBlobs(root, oids) {
     const result = new Map();
-    if (specs.length === 0) return result;
-    const input = specs.map(s => `${s.object}\n`).join('');
-    const proc = spawnSync('git', ['cat-file', '--batch'], { cwd: root, input, maxBuffer: MAX_BUFFER });
+    const unique = [...new Set(oids)];
+    if (unique.length === 0) return result;
+    const proc = spawnSync('git', ['cat-file', '--batch'], { cwd: root, input: unique.join('\n') + '\n', maxBuffer: MAX_BUFFER });
     if (proc.error || proc.status !== 0) {
         throw new Error(`git cat-file failed: ${proc.error ? proc.error.message : proc.stderr.toString().trim()}`);
     }
     const out = proc.stdout;
     let offset = 0;
-    for (const spec of specs) {
+    for (const oid of unique) {
         const newline = out.indexOf(10, offset);
-        const header = out.subarray(offset, newline).toString();
-        offset = newline + 1;
-        if (header.endsWith(' missing')) {
-            result.set(spec.file, null);
-            continue;
+        const header = newline === -1 ? '' : out.subarray(offset, newline).toString();
+        const [gotOid, type, sizeText] = header.split(' ');
+        if (gotOid !== oid || type !== 'blob') {
+            throw new Error(`git cat-file returned "${header}" for object ${oid}; the repository may be corrupt.`);
         }
-        const size = Number(header.split(' ')[2]);
-        result.set(spec.file, out.subarray(offset, offset + size));
+        const size = Number(sizeText);
+        offset = newline + 1;
+        result.set(oid, out.subarray(offset, offset + size));
         offset += size + 1;
     }
     return result;
@@ -133,8 +155,9 @@ function readFiles(root, files, source = WORKTREE) {
     if (source.kind === 'worktree') {
         return new Map(files.map(f => [f, readWorktreeFile(root, f)]));
     }
-    const prefix = source.kind === 'index' ? ':' : `${source.ref}:`;
-    return readObjects(root, files.map(file => ({ file, object: `${prefix}${file}` })));
+    const entries = entriesOf(root, source);
+    const blobs = readBlobs(root, files.filter(f => entries.has(f)).map(f => entries.get(f).oid));
+    return new Map(files.map(f => [f, entries.has(f) ? blobs.get(entries.get(f).oid) : null]));
 }
 
 function readFile(root, file, source = WORKTREE) {

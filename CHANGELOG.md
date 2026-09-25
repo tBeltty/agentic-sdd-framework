@@ -8,6 +8,43 @@ with `npx github:tBeltty/agentic-sdd-framework#v<version>`.
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-09-25
+
+Records written by 1.3.0 use the old format: run `sdd-verify --record` (and `sdd-verify --task`
+for recorded evidence) again before pushing a `Completed` spec.
+
+### Changed
+- `Last Verified` now ends with `check <hash>`, a hash over the date, result, commit, exit code,
+  state, verification command, and expected output. Editing FAIL to PASS, or changing the command
+  or expected output after recording, reopens the spec. Recorded task evidence hashes the date and
+  exit code together with the transcript.
+- `sdd-verify --record` refuses to run while untracked files exist; they took part in the run but
+  not in the recorded state.
+- `sdd-init` reuses the answers stored in an existing `sdd.config.json` as defaults; only explicit
+  flags override them. The spec and Rigor documents are created at the configured
+  `specification.specFile` and `specification.roadmapDir`.
+- Rigor mode requires `auditkit` 0.3.1 or newer. CI pins the protocol repository to v0.3.1.
+
+### Fixed
+- Files were read by path through `git show`/`cat-file`, so a name containing a newline, or a
+  staged file named like `0:path`, was read wrongly or skipped. Blobs are now read by object id and
+  every `cat-file` header is validated.
+- A secret introduced only by a merge commit was not scanned in push mode.
+- The secret scanner reported expressions assigned to secret-named keys (`password = getPassword()`)
+  and missed unquoted values in config files; one placeholder on a line hid a real key later on the
+  same line; a NUL byte or UTF-16 encoding hid a file from the scan.
+- The specification parser read `Status` lines and tasks inside code fences and HTML comments,
+  accepted several `Status` lines, and ignored tasks inside blockquotes. Evidence containing
+  backtick fences could end the recorded block early.
+- On timeout, `sdd-verify` killed only the shell; background processes started by the command kept
+  running. The whole process tree is now killed, and output is decoded as a UTF-8 stream.
+- The framework exemption in the specification check applied to any project with
+  `project.type: framework`; it now also requires the framework's package name.
+- The config validator accepted inherited object keys such as `toString`, and empty path strings.
+- The prose linter skipped all of `docs/roadmap/` even when `roadmapDir` pointed elsewhere; it now
+  skips the configured `roadmapDir` and the vendored templates.
+- Test temporary directories are removed on exit; the hook tests run on Windows through `sh`.
+
 ## [1.3.0] - 2026-09-25
 
 ### Fixed
