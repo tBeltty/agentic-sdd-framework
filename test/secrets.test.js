@@ -212,7 +212,9 @@ test('R4: secret-named keys ending in _key, and unquoted values in shell, rc and
         [`ENV STRIPE_SECRET=${value}`, 'Dockerfile'],
         [`ENV STRIPE_SECRET ${value}`, 'docker/api.Dockerfile'],
         [`set API_TOKEN=${value}`, 'deploy.cmd'],
-        ['set DB_PASSWORD=S3cretPassw0rd', 'setup.bat']
+        ['set DB_PASSWORD=S3cretPassw0rd', 'setup.bat'],
+        ['setx DB_PASSWORD Hunter2Secret99', 'deploy.bat'],
+        [`setx /M API_TOKEN ${value}`, 'deploy.cmd']
     ]) {
         assert.strictEqual(found(line, file)[0]?.patternName, 'Secret Assignment', `${file}: ${line}`);
     }
@@ -225,6 +227,7 @@ test('R4: secret-named keys ending in _key, and unquoted values in shell, rc and
         ['$credential = Get-Credential', 'deploy.ps1'],
         ['set /p DB_PASSWORD=Enter the database password:', 'setup.bat'],
         ['set API_TOKEN=%API_TOKEN%', 'deploy.cmd'],
+        ['setx PATH "%PATH%;C:\\tools"', 'deploy.cmd'],
         ['$token = Get-AzAccessToken -ResourceUrl $url', 'deploy.ps1'],
         ['$securePassword = ConvertTo-SecureString $plain -AsPlainText -Force', 'deploy.ps1']
     ]) {

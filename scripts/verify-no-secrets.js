@@ -81,9 +81,11 @@ const isPlaceholder = value => SAFE_PLACEHOLDERS.some(p => value.toLowerCase().i
 // files, an unquoted value is a literal too.
 function secretAssignment(rawLine, { configFile }) {
     // Dockerfile legacy form `ENV KEY value` is `ENV KEY=value`.
-    const line = configFile ? rawLine.replace(/^(\s*(?:ENV|ARG)\s+)([A-Za-z_][A-Za-z0-9_]*)\s+(?=\S)/i, '$1$2=') : rawLine;
+    let line = configFile ? rawLine.replace(/^(\s*(?:ENV|ARG)\s+)([A-Za-z_][A-Za-z0-9_]*)\s+(?=\S)/i, '$1$2=') : rawLine;
     // `set /p NAME=Prompt:` in a batch file reads input; the text is a prompt, not a value.
     if (configFile && /^\s*set\s+\/p\b/i.test(line)) return null;
+    // `setx [/M] NAME value` (batch) is `NAME=value`.
+    if (configFile) line = line.replace(/^(\s*@?setx(?:\s+\/\w+)*\s+)"?([A-Za-z_][A-Za-z0-9_]*)"?\s+(?=\S)/i, '$1$2=');
     const match = line.match(SECRET_KEY_RE);
     if (!match) return null;
     const [, key, rest] = match;

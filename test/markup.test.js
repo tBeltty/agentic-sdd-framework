@@ -83,3 +83,16 @@ test('R27: HTML comments start at column 0, and every fence is closed', () => {
     assert.match(lint(spec({ status: 'Draft' }) + '\n```\n* [ ] **T9:** swallowed\n'), /A fence is never closed/);
     assert.strictEqual(lint(spec({ status: 'Draft' }) + '\n<!-- a note\nover two lines -->\n'), '');
 });
+
+test('R28: a fence on a list-marker line is rejected, so it cannot hide tasks or swap the gate command', () => {
+    const hiddenTask = spec({ status: 'Draft' }).replace('* [ ] **T2:**', '* ~~~\n  ~~~\n  * [ ] **T9:** not done\n  ~~~\n* [ ] **T2:**');
+    assert.match(lint(hiddenTask), /fence on the same line as a list or blockquote marker/);
+    for (const marker of ['1. ~~~', '- ```', '> ~~~', '* > ~~~', '* [ ] ~~~']) {
+        assert.notStrictEqual(lint(spec({ status: 'Draft' }) + `\n${marker}\nx\n~~~\n`), '', `${marker} must be rejected`);
+    }
+    const swapped = spec({ status: 'In Progress', command: 'echo good' }).replace('* **Verification Command:**\n',
+        '* **Verification Command:**\n  * ~~~\n    ~~~\n    <!--\n    echo hidden\n    true -->/dev/null\n    ~~~\n');
+    assert.match(lint(swapped), /fence on the same line as a list or blockquote marker/);
+    // Outside the subset nothing is guessed: the spec fails, and sdd-verify refuses to run it.
+    assert.ok(parseSpec(swapped).hiddenProblems.length > 0);
+});

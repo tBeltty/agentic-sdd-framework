@@ -47,7 +47,8 @@ function visibleLines(lines, hidden = commentLines(lines)) {
  * subset is reported as a problem instead of being guessed at, because every place the
  * parser and the renderer disagree is a place to hide an unchecked task or a second Status:
  *   - indentation uses spaces, never tabs;
- *   - fences open and close at most 3 spaces past their list item (or the margin), are
+ *   - fences sit on their own line (never after a list or blockquote marker, as in
+ *     `* ~~~`), open and close at most 3 spaces past their list item (or the margin), are
  *     always closed, hold no line indented less than the opening fence (so no list item
  *     can end inside them), and are not inside blockquotes;
  *   - backticks pair up on each line (code spans do not span lines);
@@ -70,6 +71,8 @@ const FIELD_LIKE = [
     { name: 'Last Verified', loose: /^[^A-Za-z0-9]*last\s+verified[^A-Za-z0-9]*:/i, exact: /^\* \*\*Last Verified:\*\*/ }
 ];
 const TASK_LIKE_RE = /^[^A-Za-z0-9[]*\[[ xX]\]/;
+// A fence after one or more list or blockquote markers on the same line ("* ~~~", "1. > ```").
+const MARKER_FENCE_RE = /^\s*(?:(?:[*+-]|\d{1,9}[.)]|>)[ \t]*)+(?:`{3,}|~{3,})/;
 
 // Content column of the list item that contains lines[at] (0 at the top level).
 function containerIndent(lines, at) {
@@ -163,6 +166,9 @@ function ambiguousMarkup(lines, hidden) {
             return;
         }
         if (fence.inside) return;
+        if (MARKER_FENCE_RE.test(lines[i])) {
+            at(i, 'a fence on the same line as a list or blockquote marker is not supported. Put the fence on its own line, indented under the item.');
+        }
         if (/\t/.test(leading)) at(i, 'indent with spaces, not tabs (Markdown expands a tab to 4 columns).');
         const prose = proseOf(line);
         if (prose === null) {
