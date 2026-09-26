@@ -104,7 +104,14 @@ function secretAssignment(rawLine, { configFile }) {
 
 const ALLOW_PRAGMA = 'sdd-allow-secret';
 
-const SKIPPED_FILES = ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'verify-no-secrets.js'];
+// Skipped: this scanner at the paths the framework installs it (its patterns would match
+// themselves), lockfiles by their exact names (integrity hashes, no credentials), and
+// dependency directories as whole path segments. Everything else is scanned.
+const SKIPPED_PATHS = ['scripts/verify-no-secrets.js', '.sdd/scripts/verify-no-secrets.js'];
+const LOCKFILES = ['package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lockb'];
+const isSkipped = file => SKIPPED_PATHS.includes(file)
+    || LOCKFILES.includes(path.posix.basename(file))
+    || /(^|\/)node_modules\//.test(file);
 
 const SENSITIVE_FILES = [
     {
@@ -169,7 +176,7 @@ function run({ root, source = WORKTREE, files: only = null } = {}) {
     const config = loadConfig(root, source);
     const allowFiles = new Set(getIn(config, 'security.allowFiles', []));
     const files = (only || listFiles(root, source)).filter(f =>
-        !f.includes('node_modules/') && !f.endsWith('.lock') && !SKIPPED_FILES.includes(path.posix.basename(f)));
+        !isSkipped(f));
 
     const violations = [];
     let suppressed = 0;

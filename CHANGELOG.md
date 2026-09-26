@@ -23,7 +23,7 @@ for recorded evidence) again before pushing a `Completed` spec.
 - `sdd-init` reuses the answers stored in an existing `sdd.config.json` as defaults; only explicit
   flags override them. The spec and Rigor documents are created at the configured
   `specification.specFile` and `specification.roadmapDir`.
-- Rigor mode requires `auditkit` 0.3.6 or newer. CI pins the protocol repository to v0.3.6.
+- Rigor mode requires `auditkit` 0.3.7 or newer. CI pins the protocol repository to v0.3.7.
 - Check scripts reject unknown flags (a typo checked the working tree instead) and accept
   `--ref <commit>` as well as `--ref=<commit>`.
 - Config paths must be canonical (`docs/SPEC.md`, not `./docs/SPEC.md`), and `specFile` and
@@ -50,13 +50,20 @@ for recorded evidence) again before pushing a `Completed` spec.
   `sdd-verify` run a command other than the rendered one), escaped backticks, labels inside link
   titles, multi-line link titles, HTML entities, invisible or look-alike characters in the Status,
   blockquote markers stripped inside evidence fences (which also rejected real transcripts with
-  `>` lines), multi-line link reference
+  `>` lines), `<!-->` and tab-indented comments, email-like autolinks masking inline HTML,
+  multi-line link labels and footnotes, fields inside numbered list items, multi-line link reference
   definitions, raw HTML blocks, Status variants such as `**Status**:`). The spec is now held to
-  a strict Markdown subset in which the parse matches the rendering, and markup outside it
+  a strict Markdown subset in which the parse matches the rendering (no raw HTML or comments,
+  no link definitions or footnotes), and markup outside it
   fails with the line and the fix. Checked with a differential fuzz against a CommonMark
   renderer (`scripts/dev/fuzz-spec-markup.js`, dev-only): no accepted spec rendered an unchecked task or a Status the parser missed.
 - `sdd-verify --task` wrote evidence at 2 spaces under numbered tasks, which rendered outside
   the list item; evidence now goes at the item's content column.
+- The secret scanner skipped any file named `verify-no-secrets.js`, any `*.lock`, and any path
+  containing `node_modules/`; it now skips only its own installed paths, lockfiles by exact name,
+  and `node_modules/` path segments, as documented in the README.
+- Where symlinks are unavailable, the skill copies in `.claude/skills/` failed a fresh project's
+  prose check; they are excluded like the `.agents/skills/` originals.
 - Plain-text values in Windows batch files (`set API_TOKEN=...`, `setx NAME value`) were not
   scanned as literals, and Go/Pascal `:=` assignments were never scanned.
 - `scripts/dev/sync-vendored.js` treated a mistyped flag as a write; unknown flags are errors.

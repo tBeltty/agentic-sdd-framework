@@ -14,25 +14,10 @@ const indentOf = line => line.match(/^ */)[0].length;
 const isBlank = line => /^[ \t]*$/.test(line);
 const stripQuote = line => line.replace(/^( *> ?)+/, '');
 
-// Spec structure that must never sit inside an HTML comment.
-const STRUCTURE_RE = /\[( |x|X)\]|\*\*(?:Status|Verification Command|Expected Output|Last Verified|Evidence):\*\*|`{3,}|~{3,}/i;
-
-// Marks the lines of HTML comment blocks: a line whose content starts with `<!--` (outside
-// fenced code) opens one, and the first line containing `-->` after it closes it.
+// HTML comments are outside the supported subset (they are reported as raw HTML), so no
+// line is ever treated as hidden: the parser reads every line the author wrote.
 function commentLines(lines) {
-    const fence = createFenceTracker();
-    let inComment = false;
-    return lines.map(line => {
-        if (inComment) {
-            if (line.includes('-->')) inComment = false;
-            return true;
-        }
-        if (fence.update(line) || fence.inside) return false;
-        const content = stripQuote(line).trimStart();
-        if (!content.startsWith('<!--')) return false;
-        inComment = !content.slice(4).includes('-->');
-        return true;
-    });
+    return lines.map(() => false);
 }
 
 // Blanks HTML comment blocks (keeping line numbers).
@@ -68,21 +53,22 @@ function visibleLines(lines, hidden = commentLines(lines)) {
  *     always closed, hold no line indented less than the opening fence (so no list item
  *     can end inside them), and are not inside blockquotes;
  *   - backticks pair up on each line (code spans do not span lines);
- *   - no raw HTML outside code, except whole-line comment blocks that start at column 0
- *     (never inside a list item or blockquote), hold no spec structure, and end with `-->`;
- *   - link reference definitions fit on one line;
+ *   - no raw HTML outside code, HTML comments included (a URL is linked as plain text);
+ *   - no link reference definitions or footnotes (use inline links), and a line that starts
+ *     with "[" closes it on the same line;
  *   - no HTML entities, non-ASCII whitespace, or invisible characters outside code, and no
  *     link title that spans lines (all can hide or disguise text);
  *   - Status, Verification Command, Expected Output and Last Verified appear in their exact
- *     form; lines that only resemble them (compared after folding case, punctuation, and
- *     look-alike letters) are errors.
+ *     form; lines that only resemble them are errors: the field name followed by a colon, or
+ *     emphasized, at the start of a line or list item, compared after folding case,
+ *     punctuation, and look-alike letters.
  */
 const LIST_ITEM_RE = /^( *)([*+-]|\d{1,9}[.)])( {1,4}|$)/;
 const ESCAPABLE_RE = /[!-/:-@[-`{-~]/;
-const AUTOLINK_RE = /<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\s<>]*>|<[^\s<>@]+@[^\s<>]+>/g;
 const RAW_HTML_RE = /<(?:[A-Za-z][A-Za-z0-9-]*(?=[\s/>]|$)|\/[A-Za-z]|!|\?)/;
-const LINK_DEFINITION_RE = /^ {0,3}\[[^\]]+\]:/;
-const COMPLETE_DEFINITION_RE = /^ {0,3}\[[^\]]+\]:\s*\S+(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*$/;
+// A link reference definition or footnote ("[x]: url", "[^1]: note") at the start of a line.
+const DEFINITION_RE = /^ {0,3}(?:\[\^|\[[^\]]*\]:)/;
+const LIST_MARKERS_RE = /^(?: *(?:[*+-]|\d{1,9}[.)])[ \t]+)+/;
 const FIELD_LIKE = [
     { name: 'Status', key: 'status', exact: /^\*\*Status:\*\* / },
     { name: 'Verification Command', key: 'verificationcommand', exact: /^\* \*\*Verification Command:\*\*/ },
@@ -100,6 +86,26 @@ const CONFUSABLES = new Map(Object.entries({
 }));
 // A line reduced to lowercase ASCII letters, digits and colons, look-alikes folded.
 const skeleton = line => [...line.normalize('NFKC').toLowerCase()].map(c => CONFUSABLES.get(c) || c).join('').replace(/[^a-z0-9:]/g, '');
+
+// True when a line reads as the field `key` ("status", "verificationcommand", ...): the name
+// followed by a colon, or the name emphasized, at the start of the line or of a list item.
+function looksLikeField(line, key) {
+    const body = line.replace(LIST_MARKERS_RE, '');
+    if (skeleton(body).startsWith(`${key}:`)) return true;
+    const emphasized = body.match(/^([*_~]{1,3})(.+?)\1/);
+    return Boolean(emphasized) && skeleton(emphasized[2]).startsWith(key);
+}
+
+// True when a line starts with "[" that is not closed on it (a label that spans lines).
+function unclosedLeadingBracket(prose) {
+    if (!/^ {0,3}\[/.test(prose)) return false;
+    let depth = 0;
+    for (const ch of prose) {
+        if (ch === '[') depth++;
+        else if (ch === ']' && --depth === 0) return false;
+    }
+    return true;
+}
 const TASK_LIKE_RE = /^[^A-Za-z0-9[]*\[[ xX]\]/;
 // A fence after one or more list or blockquote markers on the same line ("* ~~~", "1. > ```").
 const MARKER_FENCE_RE = /^[ \t]*(?:(?:[*+-]|\d{1,9}[.)]|>)[ \t]*)+(?:`{3,}|~{3,})/;
@@ -189,21 +195,8 @@ function ambiguousMarkup(lines, hidden) {
     const fence = createFenceTracker();
     let fenceContainer = 0;
     let fenceIndent = 0;
-    let afterDefinition = false;
     const counts = Object.fromEntries(FIELD_LIKE.map(f => [f.name, 0]));
     lines.forEach((raw, i) => {
-        if (hidden[i]) {
-            const line = stripQuote(raw);
-            if (STRUCTURE_RE.test(line)) at(i, 'an HTML comment holds spec structure (a task, Status, gate field, or code fence). Move it out of the comment or delete it.');
-            const opening = i === 0 || !hidden[i - 1];
-            if (opening && (line !== raw || indentOf(raw) > 0)) {
-                at(i, 'HTML comments are supported only at the top level, starting at column 0. Move or remove this one.');
-            }
-            const closing = i === lines.length - 1 || !hidden[i + 1];
-            if (closing && !raw.trimEnd().endsWith('-->')) at(i, 'an HTML comment block must end with "-->" at the end of its last line (and must be closed).');
-            afterDefinition = false;
-            return;
-        }
         // Fence content is verbatim: no blockquote stripping, spaces-only indentation.
         const wasInside = fence.inside;
         if (wasInside && !isBlank(raw) && indentOf(raw) < fenceIndent) {
@@ -220,7 +213,6 @@ function ambiguousMarkup(lines, hidden) {
                 fenceContainer = container;
                 fenceIndent = indentOf(raw);
             }
-            afterDefinition = false;
             return;
         }
         if (fence.inside) return;
@@ -234,25 +226,21 @@ function ambiguousMarkup(lines, hidden) {
         }
         if (/\t/.test(leading)) at(i, 'indent with spaces, not tabs (Markdown expands a tab to 4 columns).');
         if (INVISIBLE_RE.test(raw)) at(i, 'non-ASCII whitespace or an invisible character can disguise text. Use plain spaces and remove invisible characters.');
-        if (afterDefinition && /^ {0,3}["'(]/.test(line)) at(i, 'a link reference definition must fit on one line (this line would be its hidden title).');
-        afterDefinition = LINK_DEFINITION_RE.test(line);
         const prose = proseOf(line);
         if (prose === null) {
             at(i, 'a backtick code span is not closed on the same line. Close it on this line, or escape the backtick as \\`.');
             return;
         }
-        if (RAW_HTML_RE.test(prose.replace(AUTOLINK_RE, ' '))) {
-            at(i, 'raw HTML is not supported in the specification (it can hide or change what renders). Use Markdown, or put it in a code span.');
+        if (RAW_HTML_RE.test(prose)) {
+            at(i, 'raw HTML (HTML comments included) is not supported in the specification: it can hide or change what renders. Use Markdown, or put it in a code span.');
         }
         if (ENTITY_RE.test(prose)) at(i, 'HTML entities (such as &#116;) can disguise text. Write the character itself.');
         if (unclosedLink(prose)) at(i, 'an inline link or image is not closed on this line; its title would hide the lines after it.');
-        if (afterDefinition) {
-            if (!COMPLETE_DEFINITION_RE.test(line)) at(i, 'a link reference definition must fit on one line.');
-            if (STRUCTURE_RE.test(line)) at(i, 'a link reference definition holds spec structure, which does not render. Remove it.');
+        if (DEFINITION_RE.test(prose) || unclosedLeadingBracket(prose)) {
+            at(i, 'link reference definitions and footnotes are not supported (they render nothing and can hide lines). Use an inline link: [text](url).');
         }
-        const shape = skeleton(line);
         for (const field of FIELD_LIKE) {
-            if (!shape.startsWith(field.key)) continue;
+            if (!looksLikeField(line, field.key)) continue;
             counts[field.name]++;
             if (!field.exact.test(line) || quoted) at(i, `write the ${field.name} line exactly as in the template ("${field.name === 'Status' ? '**Status:** <value>' : `* **${field.name}:**`}" at the start of the line, outside blockquotes).`);
         }

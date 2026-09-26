@@ -32,7 +32,7 @@ const { parseSpec } = require('./lib/spec');
 const { stateOf, referenceSourceFor } = require('./lib/state');
 
 const AUDITKIT_INSTALL = 'pipx install git+https://github.com/tBeltty/auditor-executor-protocol';
-const MIN_AUDITKIT = [0, 3, 6];
+const MIN_AUDITKIT = [0, 3, 7];
 
 function lintLiteSpec(text, { requireRecordedEvidence = false, expectedState = null, shallow = false } = {}) {
     const spec = parseSpec(text);

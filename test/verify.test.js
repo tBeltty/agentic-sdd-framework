@@ -100,10 +100,10 @@ test('R1: a verification command hidden in an HTML comment is never run or recor
     const hiddenFence = '<!--\n  ```sh\n  echo ok\n  ```\n-->\n';
     const text = base.replace('* **Verification Command:**\n', `* **Verification Command:**\n${hiddenFence}`);
     assert.notStrictEqual(text, base, 'fixture must insert the hidden fence');
-    assert.strictEqual(parseSpec(text).gate.command, `${NODE} -e "console.log('ok')"`);
-    assert.match(lint(text).join(), /HTML comment holds spec structure/);
+    // Comments are outside the subset: the spec fails and sdd-verify refuses to run it.
+    assert.match(lint(text).join(), /raw HTML/);
     const repo = liteProject(text);
-    await assert.rejects(() => verify({ root: repo, record: true, log: quiet }), /HTML comment holds spec structure/);
+    await assert.rejects(() => verify({ root: repo, record: true, log: quiet }), /raw HTML/);
 });
 
 test('R2: an inline "<!--" (code span or prose) hides nothing', () => {
@@ -116,7 +116,7 @@ test('R2: an inline "<!--" (code span or prose) hides nothing', () => {
 
 test('R2: an unterminated comment block that hides tasks fails instead of passing', () => {
     const text = spec({ status: 'Draft' }).replace('* [ ] **T2:**', '<!-- start\n* [ ] **T2:**');
-    assert.match(lint(text).join(), /HTML comment holds spec structure/);
+    assert.match(lint(text).join(), /raw HTML/);
 });
 
 test('sdd-verify --task records real output as evidence and checks the box', async () => {
@@ -162,7 +162,7 @@ test('R17: a multi-line inline comment cannot swap the Status', () => {
     const text = spec({ status: 'Completed' }).replace('**Status:** Completed', '**Status:** Draft')
         .replace(/(\*\*Specification Mode:\*\*[^\n]*?)\s*\n\*\*Status:\*\* Draft/, '$1 <!--\n**Status:** Draft\n--> **Status:** Completed');
     assert.match(text, /<!--\n\*\*Status:\*\* Draft\n-->/, 'fixture must wrap the Status line');
-    assert.match(lint(text).join(), /raw HTML is not supported/);
+    assert.match(lint(text).join(), /raw HTML/);
 });
 
 test('R18: a fence indented into an indented code block does not hide the tasks after it', () => {
@@ -176,7 +176,7 @@ test('R18: a fence indented into an indented code block does not hide the tasks 
 });
 
 test('R19: raw <script>, <style>, or <textarea> tags are rejected; code spans that mention them are not', () => {
-    assert.match(lint(spec({ status: 'Draft' }) + '\n<style>\n**Status:** Completed\n</style>\n').join(), /raw HTML is not supported/);
+    assert.match(lint(spec({ status: 'Draft' }) + '\n<style>\n**Status:** Completed\n</style>\n').join(), /raw HTML/);
     assert.deepStrictEqual(lint(spec({ status: 'Draft' }) + '\nThe page loads `<script src="app.js">` last.\n'), []);
 });
 

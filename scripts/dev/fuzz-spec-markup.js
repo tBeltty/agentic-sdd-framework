@@ -33,6 +33,9 @@ const BODY = [
     '[n](https://e.com "t', 'end")', '[n](https://e.com "t")', '**Sta&#116;us:** Completed', '**Sta\u200Btus:** Completed',
     '**\u0405tatus:** Completed', '\u00A0', '  \u00A0', '> x', '>   * [ ] **T7:** q', '  > * [ ] **T8:** q', '[d]: https://e.com',
     '"title"', '[ci]: https://e.com "**Verification Command:**"', '**Status**: Completed', '**Status:**Completed', '&nbsp;',
+    '<!-->', '<!--->', '\t<!--', '\t-->', 'notes <!--x@y_z>', '<https://e.com>', '<a@b.co>', '[ref', ']: https://e.com',
+    '[^n]: note', '[^n]', '1. **Status:** Draft', '1. **Verification Command:**', '   ```bash', '   echo D', '   ```',
+    '**Status** Completed', '__Status:__ Draft', 'Status codes follow RFC 9110', '    rm -rf build', '__Verification Command:__',
 ];
 const SAFE = ['**Status:** Draft', '* [ ] **T2:** open', '* [x] **T3:** done', '  * [ ] **T4:** nested', '', 'plain text',
     '  ```bash', '  echo A', '  ```', '  ~~~', '  echo B', '<!-- x -->', 'a `b` c', '  indented two'];
@@ -41,11 +44,17 @@ function renderedView(text) {
     const html = md.render(text);
     const noCode = html.replace(/<pre>[\s\S]*?<\/pre>/g, '').replace(/<code>[\s\S]*?<\/code>/g, '');
     const tasks = [...noCode.matchAll(/<li>(?:\s*<p>)?\s*\[( |x|X)\]\s/g)].map(m => m[1] !== ' ');
-    // Every rendered block whose text reads like a Status line, however it is spelled.
-    const blocks = noCode.split(/<\/?(?:p|li|h[1-6]|blockquote|ul|ol)[^>]*>|<br\s*\/?>|\n/)
-        .map(b => b.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>'))
-        .map(skeleton).filter(b => b.startsWith('status'));
-    const statuses = blocks.map(b => b.slice(b.indexOf(':') + 1));
+    // Every rendered block that reads as a Status line: "Status" followed by a colon, or
+    // emphasized, at the start of the block, however it is spelled.
+    const decode = t => t.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+    const statuses = [];
+    for (const block of noCode.split(/<\/?(?:p|li|h[1-6]|blockquote|ul|ol)[^>]*>|<br\s*\/?>|\n/)) {
+        const text = skeleton(decode(block));
+        const emphasized = block.trim().match(/^<(strong|em|del|s)>([\s\S]*?)<\/\1>/);
+        if (text.startsWith('status:') || (emphasized && skeleton(decode(emphasized[2])).startsWith('status'))) {
+            statuses.push(text.slice(text.indexOf(':') + 1) || text.slice('status'.length));
+        }
+    }
     let command = null;
     const at = html.indexOf('<strong>Verification Command:</strong>');
     if (at !== -1) {

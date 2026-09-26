@@ -263,3 +263,15 @@ test('R13: guided mode on a missing target asks to create it instead of crashing
     assert.doesNotMatch(output, /node:fs|at Object\./);
     assert.ok(!fs.existsSync(missing), 'declining creates nothing');
 });
+
+test('R33: where symlinks are unavailable, the copied skills do not fail the project gate', () => {
+    const project = tempRepo();
+    const stub = path.join(tempDir(), 'nosym.js');
+    fs.writeFileSync(stub, "require('fs').symlinkSync = () => { const e = new Error('EPERM'); e.code = 'EPERM'; throw e; };\n");
+    execFileSync(process.execPath, ['--require', stub, INIT, '--express'], { cwd: project, stdio: 'pipe' });
+    assert.ok(fs.lstatSync(path.join(project, '.claude/skills/no-ai-slop')).isDirectory());
+    assert.ok(exists(project, '.claude/skills/no-ai-slop/.sdd-managed-copy'), 'skills were copied, not linked');
+    git(project, 'add', '-A');
+    const gate = spawnSync(process.execPath, ['.sdd/scripts/quality-gate.js'], { cwd: project, encoding: 'utf8' });
+    assert.strictEqual(gate.status, 0, gate.stdout + gate.stderr);
+});

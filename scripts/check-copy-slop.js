@@ -25,9 +25,13 @@ const PROSE_EXTENSIONS = ['.md', '.mdx', '.txt'];
 // Rigor templates are synced from their upstream repositories and linted there. Rigor
 // documents (specification.roadmapDir) are records in the protocol's format and hold
 // pasted command output.
+// sdd-init copies the skills into .claude/skills/ where symlinks are unavailable (Windows
+// without Developer Mode), so those copies are excluded too.
 const DEFAULT_EXCLUDE = [
     '.agents/skills/no-ai-slop/',
     '.agents/skills/auditor-executor-protocol/',
+    '.claude/skills/no-ai-slop/',
+    '.claude/skills/auditor-executor-protocol/',
     'docs/roadmap/templates/'
 ];
 
