@@ -1,92 +1,68 @@
 # Agentic SDD Framework
 
-> Spec-Driven Development governance for AI coding agents: agent rules that load automatically, specifications with recorded evidence, and a quality gate that checks both before every push.
+> **Deterministic governance for AI coding agents.** Stop Claude Code, Cursor, Antigravity, and Codex from hallucinating completed tasks and drifting out of scope.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![npm version](https://img.shields.io/npm/v/agentic-sdd-framework.svg)](https://www.npmjs.com/package/agentic-sdd-framework)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Node: 22+](https://img.shields.io/badge/node-22%2B%20LTS-green.svg)](https://nodejs.org/)
 [![Quality Gate](https://github.com/tBeltty/agentic-sdd-framework/actions/workflows/quality-gate.yml/badge.svg?branch=main)](https://github.com/tBeltty/agentic-sdd-framework/actions)
 
 ---
 
-## 🎯 What It Does
+## The Problem
 
-AI coding agents (Claude Code, Antigravity, Cursor, Codex) write code quickly, and without constraints they also guess the stack, drift out of scope, and report work as done without running it. This framework adds three things to a repository:
+AI coding agents write code fast, but uncontrolled:
+- They check off `[x] Done` without actually running the code.
+- They silently guess the stack, add dependencies, and drift from what was asked.
+- They pass a manual review because reading terminal output line by line is tedious, so nobody does it every time.
 
-1. **Agent rules that load without a prompt.** `AGENTS.md`, `CLAUDE.md`, and `.claude/skills/` point every supported agent at a constitution, an operational context file, and four on-demand skills.
-2. **A specification with evidence.** Tasks are checked off with recorded command output, and a spec is completed only with a recorded verification run tied to the exact content it verified.
-3. **A quality gate.** A pre-push hook checks the commits being pushed for secrets, prose rules, file size limits, and specification evidence.
+## The Solution
 
-```mermaid
-graph LR
-    subgraph VibeCoding [Without a specification]
-        V1[Vague Prompt] --> V2[Agent Guesses Stack]
-        V2 --> V3[Unverified Multi-File Edits]
-        V3 --> V4[Regression Cascade]
-    end
-
-    subgraph AgenticSDD [With Agentic SDD]
-        S1[Constitution and Discovery] --> S2[Specification]
-        S2 --> S3[Atomic Tasks with Evidence]
-        S3 --> S4[Recorded Verification Gate]
-    end
-```
+Agentic SDD adds a specification lifecycle to your repository that an agent cannot talk its way around:
+1. **Rules that load without a prompt.** `AGENTS.md` and `CLAUDE.md` point every supported agent at a constitution before it writes a line of code.
+2. **Evidence, not claims.** A task cannot be checked off by hand: `sdd-verify` runs the command and stamps the result with a hash tied to the exact file state it verified.
+3. **A gate that actually blocks.** A pre-push hook fails the push, before it reaches `origin`, if evidence is missing, faked, or stale.
 
 ---
 
-## 🧭 Progressive Rigor: Two Specification Modes
+## See It Work
 
-Projects begin simply and scale as architectural complexity grows. The mode is set in `sdd.config.json`:
+```text
+$ git push
+❌ T1 is checked but has no evidence.
+   Quality gate failed — push rejected.
 
-```mermaid
-graph TD
-    A[New Project or Feature] --> B{Choose Specification Depth}
-    B -->|Solo Dev / Lightweight MVP| C[Lite Mode - Default]
-    C --> C1[Single File: docs/SPEC.md]
-    C1 --> C2[Recorded Verification Gate]
-    B -->|Multi-Agent / Enterprise System| D[Rigor Mode]
-    D --> D1[Plan, Execution Guide, Compliance Log, Annexes]
-    D1 --> D2[Negative Control Gates]
+$ sdd-verify --task T1 -- npm test
+$ 42 passed
+✅ T1: exit 0, evidence recorded in docs/SPEC.md.
+
+$ git add -A && git commit -m "T1: parser" && git push
+✅ Quality gate passed.
 ```
 
-### 1. 🟢 Lite Mode (Default, Solo Developers)
-* **Single Entry Point:** `docs/SPEC.md` holds context, architecture, atomic tasks, and the verification gate.
-* **Recorded Evidence:** `sdd-verify --task <ID> -- <command>` runs a command and records its output as the task's evidence. `sdd-verify --record` runs the spec's verification command and records the result.
-* **Best For:** Solo developers, utilities, early-stage MVPs.
-
-### 2. 🔴 Rigor Mode (Opt-In, Multi-Agent Teams)
-* **The Auditor-Executor document set** in `docs/roadmap/`, in the format of [auditor-executor-protocol](https://github.com/tBeltty/auditor-executor-protocol):
-  * `plan-of-record.md`: the "what" and "why" (phases and trade-offs).
-  * `execution-guide.md`: the "how" (numbered tasks `P<phase>-T<n>` and gates `P<phase>-G<n>`).
-  * `compliance-log.md`: the ledger of pasted command output and verdicts.
-  * `annexes/`: self-contained remediation orders issued after a verdict that is not a clean `APPROVED`.
-* **Mechanical Checks:** the quality gate runs `auditkit lint` (0.3.9 or newer), which rejects missing or orphaned task entries, gates without a negative control, and `DONE` reports without pasted verify output.
-* **Best For:** Multi-agent handoffs, asynchronous work, and regulated domains.
+Nobody edits the spec by hand to mark a task done: `sdd-verify` is the only thing allowed to write evidence, and it only writes what actually happened.
 
 ---
 
-## ⚡ Quickstart
-
-**Requirements:** Git and Node.js 22 LTS or newer (24 LTS recommended), for projects in any language. Rigor mode also needs Python 3.9+ for `auditkit`:
+## Quickstart
 
 ```bash
-pipx install git+https://github.com/tBeltty/auditor-executor-protocol
-```
-
-### 1. Install into a Project (Recommended)
-Run the wizard from the root of a new or existing Git repository. Pin a release tag so a later change to `main` never reaches you unannounced (see [CHANGELOG.md](CHANGELOG.md)):
-
-```bash
-cd my-project
+cd your-project
 npx github:tBeltty/agentic-sdd-framework#v1.4.0
 ```
 
-Express mode skips the interview and takes every answer from flags:
+The interactive wizard asks a few questions (specification mode, coding agent skills, runtime) and sets up agent rules, a starter spec, and the pre-push hook. Non-interactive:
 
 ```bash
-npx github:tBeltty/agentic-sdd-framework#v1.4.0 --express --mode=lite --ast=ast-grep --runtime=go-1.23
+npx github:tBeltty/agentic-sdd-framework#v1.4.0 --express --mode=lite --runtime=node-24-lts
 ```
 
-### 2. Start from a Clone
-Use the framework repository itself as the starting point of a new project:
+**Requirements:** Git and Node.js 22 LTS or newer (24 LTS recommended), for a project in any language. That's it. [Rigor mode](#progressive-modes-lite-vs-rigor) needs one more tool; see below.
+
+<details>
+<summary>Other ways to install</summary>
+
+**Start from a clone:** use the framework repository itself as the starting point of a new project.
 
 ```bash
 git clone --branch v1.4.0 https://github.com/tBeltty/agentic-sdd-framework.git my-project
@@ -94,7 +70,37 @@ cd my-project
 node scripts/sdd-init.js
 ```
 
-### Wizard Flags
+**Pin a release tag.** `#v1.4.0` above pins the exact release, so a later change to `main` never reaches you unannounced. See [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
+
+</details>
+
+---
+
+## How It Works: The 3 Pillars
+
+1. **Constitution (`AGENTS.md`, `CLAUDE.md`):** 8 non-negotiable rules, each with a "why this rule exists" field, loaded automatically by every supported agent. No prompt engineering required to keep an agent inside its lane.
+2. **Evidence-Based Spec (`sdd-verify`):** `docs/SPEC.md` holds atomic tasks; `sdd-verify --task <ID> -- <command>` runs a command and records its output as that task's evidence, and `sdd-verify --record` does the same for the spec's overall verification command. See [docs/architecture/spec-integrity.md](docs/architecture/spec-integrity.md) for exactly how that evidence is hashed and checked.
+3. **Quality Gate (pre-push hook):** before a push reaches `origin`, it's checked for secrets, low-effort AI prose, oversized files, and specification evidence, in one process with one exit code.
+
+---
+
+## Progressive Modes: Lite vs. Rigor
+
+Projects start simple and scale as complexity grows. The mode is set in `sdd.config.json`.
+
+| | 🟢 Lite (default) | 🔴 Rigor (opt-in) |
+| :--- | :--- | :--- |
+| **Use it for** | Solo developers, utilities, early-stage MVPs | Multi-agent handoffs, asynchronous work, regulated domains |
+| **Spec lives in** | One file: `docs/SPEC.md` | `docs/roadmap/`: a plan, an execution guide, a compliance log, and remediation annexes |
+| **Format** | Tasks with recorded evidence and a verification gate | The [auditor-executor-protocol](https://github.com/tBeltty/auditor-executor-protocol) document set, with negative-control gates |
+| **Extra requirement** | None | Python 3.9+ and `auditkit`: `pipx install git+https://github.com/tBeltty/auditor-executor-protocol` |
+
+---
+
+## Commands & CLI Reference
+
+<details>
+<summary><strong>Wizard flags</strong> (<code>sdd-init</code>)</summary>
 
 Flags take `--flag=value` or `--flag value`. Unknown flags are an error.
 
@@ -111,76 +117,61 @@ Flags take `--flag=value` or `--flag value`. Unknown flags are an error.
 | `--force` | Refresh copied skills, templates, and `.claude/skills/` copies | Keep existing copies |
 | `--help` | Print usage | |
 
-Rerunning the wizard is safe. Existing documents are kept, `sdd.config.json` is merged and validated (keys starting with `x-` are free-form), and `AGENTS.md` / `CLAUDE.md` are only rewritten while they carry the `sdd:managed` marker. If they already exist without it, the wizard says so and prints the line to add.
+Rerunning the wizard is safe: existing documents are kept, `sdd.config.json` is merged and validated (`x-` prefixed keys are free-form), and `AGENTS.md` / `CLAUDE.md` are only rewritten while they carry the `sdd:managed` marker.
 
-### What the Wizard Generates
+</details>
+
+<details>
+<summary><strong>What the wizard generates</strong></summary>
 
 | Path | Purpose |
 | :--- | :--- |
 | `AGENTS.md` | Entry point read automatically by Codex, Cursor, and other AGENTS.md-aware agents |
 | `CLAUDE.md` | Imports the entry point, constitution, and context into Claude Code |
-| `.claude/skills/` | Symlinks to `.agents/skills/` (copies where symlinks are unavailable) so Claude Code loads each skill on demand |
-| `.agents/AGENTS.md` | Constitution: 8 non-negotiable rules, each with a "Why this rule exists" field |
+| `.claude/skills/` | Symlinks to `.agents/skills/` (copies where symlinks are unavailable) |
+| `.agents/AGENTS.md` | Constitution: 8 non-negotiable rules |
 | `.agents/CONTEXT.md` | Project facts, incident registry, technical debt, and non-goals |
 | `docs/SPEC.md` (Lite) or `docs/roadmap/` (Rigor) | Active specification documents, checked by the quality gate |
 | `docs/decisions/ADR-0001-stack-and-architecture.md` | Stack decision record seeded with the discovery answers |
 | `sdd.config.json` | Configuration, validated against [`scripts/lib/sdd.config.schema.json`](scripts/lib/sdd.config.schema.json) |
-| `.sdd/scripts/`, `.sdd/VERSION` | Quality gate tooling and its version (install mode only) |
 | Git `pre-push` hook | Runs the quality gate on the pushed commits; an existing hook is kept as `pre-push.local` and runs first |
 
-When `core.hooksPath` is set (Husky, lefthook, or a shared hooks directory), the wizard installs nothing there and prints the command to add to that hook manager instead.
+When `core.hooksPath` is set (Husky, lefthook, or a shared hooks directory), the wizard installs nothing there and prints the command to add instead.
 
----
+</details>
 
-## 🚦 Quality Gate
+<details>
+<summary><strong>Quality gate</strong> (<code>quality-gate.js</code>)</summary>
 
-`node scripts/quality-gate.js` (`node .sdd/scripts/quality-gate.js` in installed projects) runs every check in one process and exits 1 if any fails. Each run reads files from one source:
+Runs every check in one process, exits 1 if any fails. Each run reads files from one source:
 
 | Invocation | Checks |
 | :--- | :--- |
 | *(no flag)* | Tracked files in the working tree |
 | `--staged` | The index: what the next commit contains |
-| `--ref=<commit>` or `--ref <commit>` | The content of that commit |
-| `--push [remote]` | Pre-push mode (used by the hook): every check on the tip commit of each pushed ref, plus a secret scan of every new commit in the push (merge commits included), so a secret added and later removed is still caught. Refs whose commit is already on the remote are skipped |
+| `--ref=<commit>` | The content of that commit |
+| `--push [remote]` | Pre-push mode: every check on each pushed ref's tip, plus a secret scan of every new commit in the push |
 
-Unknown flags are errors, so a typo never falls back to checking the working tree. A check that cannot read the repository (not a Git repository, Git error, unreadable file) fails; it never reports "0 files, all clean". An invalid `sdd.config.json` (unknown key, wrong type, unknown value) fails every check with the exact problem.
+Unknown flags are errors. A check that cannot read the repository fails loudly instead of reporting "0 files, clean".
 
-| Check | Script | Configuration (`sdd.config.json`) |
-| :--- | :--- | :--- |
-| Secret leak scanner | `verify-no-secrets.js` | `security.allowFiles`; the `sdd-allow-secret` line pragma (suppressions are counted in the report) |
-| No-AI-Slop copy linter | `check-copy-slop.js` | `capabilities.noAiSlop.enabled`, `.exclude`, `.maxEmDashes` |
-| File size limit | `check-file-size.js` | `architecture.maxLocPerFile` (0 disables), `architecture.maxLocExclude` |
-| Specification check | `check-spec.js` | `specification.mode`, `.specFile`, `.roadmapDir`, `.requireRecordedEvidence` |
-| Version sync | `check-versions.js` | Applies only when `project.type` is `framework` |
-
-The secret scanner reports provider keys (Anthropic, OpenAI, Stripe, GitHub, Slack, Resend, AWS, Google), private key blocks (including PGP), credentials embedded in URLs, high-entropy values assigned to secret-named keys (`password`, `client_secret`, `access_token`, `SECRET_KEY`, `signing_key`, ...; unquoted values count in env, config, rc, shell, and Docker files), and tracked secret files (`.env`, `id_rsa`, `*.key`, `*.p12`, ...). It skips only its own file at the paths the framework installs it (`scripts/` and `.sdd/scripts/`) and `node_modules/` directories; lockfiles are scanned, since a private-registry URL can embed a token. It is a regex scanner, not a replacement for a dedicated tool such as gitleaks.
-
-### What the Specification Check Enforces
-
-| Mode | Rule |
+| Check | Enforces |
 | :--- | :--- |
-| Lite, any status | Exactly one Status line: `Draft`, `In Progress`, or `Completed`; the `Verification Gate` section exists; every checked task (any checkbox list item, blockquotes included) has evidence; the spec stays within the supported Markdown subset (below) |
-| Lite, recorded evidence | Evidence written by `sdd-verify --task` must be unedited (the hash covers the date, exit code, and transcript) and exit 0 |
-| Lite, hand-written evidence | Accepted and counted in the report; rejected when `specification.requireRecordedEvidence` is `true` |
-| Lite, `In Progress` | The verification command and expected output are filled in, not template placeholders |
-| Lite, `Completed` | Every task is checked, and `Last Verified` is an unedited PASS written by `sdd-verify --record` for the current verification command and expected output, whose state fingerprint matches the content the spec was completed with |
-| Rigor | `auditkit lint docs/roadmap` exits 0 |
+| Secret leak scanner | Provider keys, private key blocks, credentials in URLs, secret-named assignments, tracked secret files |
+| No-AI-Slop copy linter | Rejects generic AI-written prose patterns |
+| File size limit | `architecture.maxLocPerFile` |
+| Specification check | Status, evidence, and verification gate rules (see below) |
+| Version sync | `package.json` and `sdd.config.json` versions match (framework repo only) |
 
-The gate reads the spec the way it renders: it parses it with a CommonMark parser (markdown-it, vendored in `scripts/lib/vendor/`, MIT) and takes tasks, the Status, the evidence, and the verification command from the parsed structure, so a line counts only if it renders as what it claims to be. On top of that, a small subset keeps GitHub's renderer and the parser in agreement: no raw HTML outside code (HTML comments included), no link reference definitions or footnotes (inline links only), no HTML entities or invisible and non-ASCII whitespace characters, spaces instead of tabs for indentation, and the Status and gate fields written exactly as in the template (a line that reads as a field name followed by a colon, or emphasized, in any other spelling is an error). Code is taken verbatim. Anything else fails with the line number and what to change; the template and everything `sdd-verify` writes stay inside the subset. `scripts/dev/fuzz-spec-markup.js` compares the gate's reading with cmark-gfm, GitHub's renderer, on random specs.
+**Specification check, Lite mode:** exactly one Status line (`Draft`, `In Progress`, `Completed`); every checked task has recorded, unedited evidence; `In Progress`/`Completed` need a real verification command and expected output; `Completed` needs every task checked and an unedited PASS from `sdd-verify --record` matching the current file state. **Rigor mode:** `auditkit lint docs/roadmap` exits 0.
 
-`sdd-verify --record` runs the spec's verification command, checks that every expected line appears in the output (`/.../` lines are regular expressions), fails if the command modified tracked files, and writes `Last Verified: <date> PASS|FAIL (commit <sha>, exit <code>, state <fingerprint>, check <hash>)`. The fingerprint covers every tracked file except the spec. The check hash covers the other fields plus the verification command and expected output, so editing the result, or changing the command after recording, reopens the spec. `--record` refuses to run while there are untracked files, because they would take part in the run without being part of the recorded state; commit, ignore, or remove them first. The gate recomputes it for the commit that completed the spec (or the uncommitted state), so files changed after the verification invalidate the PASS. Later commits that do not touch the spec do not reopen it: catching regressions after a spec is closed is the job of CI and tests.
+Full mechanism (hashing, CommonMark parsing subset, timeouts): [docs/architecture/spec-integrity.md](docs/architecture/spec-integrity.md).
 
-Commands run in `specification.verifyShell` (default `/bin/sh` on macOS and Linux, `cmd.exe` on Windows) with a limit of `specification.verifyTimeoutSeconds` (default 900). The gate never runs a command from the spec itself; it only checks recorded results. On timeout the whole process tree is killed, including background processes the command started.
-
-The check finds the commit that completed the spec in the Git history, so CI needs the full history: in GitHub Actions, use `actions/checkout` with `fetch-depth: 0`. In a shallow clone the check fails and says so.
-
-The hashes are integrity checks, not signatures: they catch hand edits and stale records, but anyone who can run `sdd-verify` can also write a matching record. For an authoritative result, have CI run `sdd-verify` again. Recorded evidence also cannot prove a verification command is meaningful; that remains the reviewer's call.
-
-`check-system-prerequisites.js` (Git identity, `gh` authentication, SSH keys) runs once inside the wizard and is available as `npm run check:prereqs`. It is not part of the gate because it depends on the local machine, not on the code.
+</details>
 
 ---
 
-## 🧠 Repository Layout
+<details>
+<summary><strong>Repository Layout</strong></summary>
 
 ```text
 agentic-sdd-framework/
@@ -196,6 +187,7 @@ agentic-sdd-framework/
 │
 ├── docs/
 │   ├── SPEC_TEMPLATE.md           # Lite Mode template
+│   ├── architecture/              # How the gate and spec integrity work internally
 │   ├── decisions/ADR_TEMPLATE.md  # Architecture Decision Record template
 │   ├── roadmap/templates/         # Rigor Mode templates (vendored from auditkit)
 │   ├── incidents/                 # Post-mortem template
@@ -214,31 +206,29 @@ agentic-sdd-framework/
 │   ├── check-system-prerequisites.js # Day-0 Git, gh CLI, and SSH checks
 │   ├── install-git-hooks.js       # pre-push hook installer
 │   ├── lib/                       # Git sources, config schema, spec parser, provisioning
-│   └── dev/sync-vendored.js       # Syncs and checks files vendored from auditor-executor-protocol
+│   └── dev/                       # Vendoring sync and the spec parser's differential fuzz
 │
 ├── test/                          # node:test suites (npm test)
 ├── CHANGELOG.md                   # Release notes
 └── sdd.config.json                # Configuration of this repository
 ```
 
----
-
-## 📜 Open-Source Attributions
-
-The **Agentic SDD Framework** integrates, adapts, or provides adapters for the following open-source projects:
-
-| Component | Author / Organization | Upstream Repository | License | Role |
-| :--- | :--- | :--- | :--- | :--- |
-| **Auditor-Executor Protocol** | **tBeltty** | [tBeltty/auditor-executor-protocol](https://github.com/tBeltty/auditor-executor-protocol) | MIT | Multi-agent coordination, Rigor Mode documents, and negative control gates. |
-| **Spec-Kit Concepts** | **GitHub** | [github/spec-kit](https://github.com/github/spec-kit) | MIT | Progressive specification hierarchy, unified single-spec model, and interactive constitution. |
-| **No-AI-Slop** | **Peter Yang** | [petergyang/no-ai-slop](https://github.com/petergyang/no-ai-slop) | MIT | Writing rules behind the copy linter. |
-| **Graphify** | **Graphify Labs** | [Graphify-Labs/graphify](https://github.com/Graphify-Labs/graphify) | Apache 2.0 | Relational knowledge graph adapter for code navigation. |
-| **ast-grep** | **Herrington Darkholme** | [ast-grep/ast-grep](https://github.com/ast-grep/ast-grep) | MIT | Tree-sitter structural search adapter. |
-| **ripgrep** | **Andrew Gallant** | [BurntSushi/ripgrep](https://github.com/BurntSushi/ripgrep) | MIT / Unlicense | Regex text search adapter. |
-| **SCIP / LSP** | **SCIP Code** (originally Sourcegraph) | [scip-code/scip](https://github.com/scip-code/scip) | Apache 2.0 | Language Server Protocol code intelligence adapter. |
+</details>
 
 ---
 
-## 🛡️ License
+## Attributions & License
 
-This repository is licensed under the [MIT License](LICENSE). The vendored `no-ai-slop` skill keeps its upstream MIT license ([`.agents/skills/no-ai-slop/LICENSE`](.agents/skills/no-ai-slop/LICENSE)).
+This repository is [MIT licensed](LICENSE). It integrates, adapts, or provides adapters for:
+
+| Component | Author | License |
+| :--- | :--- | :--- |
+| [Auditor-Executor Protocol](https://github.com/tBeltty/auditor-executor-protocol) | tBeltty | MIT |
+| [Spec-Kit Concepts](https://github.com/github/spec-kit) | GitHub | MIT |
+| [No-AI-Slop](https://github.com/petergyang/no-ai-slop) | Peter Yang | MIT |
+| [Graphify](https://github.com/Graphify-Labs/graphify) | Graphify Labs | Apache 2.0 |
+| [ast-grep](https://github.com/ast-grep/ast-grep) | Herrington Darkholme | MIT |
+| [ripgrep](https://github.com/BurntSushi/ripgrep) | Andrew Gallant | MIT / Unlicense |
+| [SCIP / LSP](https://github.com/scip-code/scip) | SCIP Code (originally Sourcegraph) | Apache 2.0 |
+
+The vendored `no-ai-slop` skill keeps its upstream MIT license ([`.agents/skills/no-ai-slop/LICENSE`](.agents/skills/no-ai-slop/LICENSE)).
