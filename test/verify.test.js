@@ -167,7 +167,8 @@ test('R17: a multi-line inline comment cannot swap the Status', () => {
 
 test('R18: a fence indented into an indented code block does not hide the tasks after it', () => {
     const text = spec({ status: 'Draft' }) + '\nNotes follow.\n\n    ```\n* [ ] **T9:** still open\n';
-    assert.match(lint(text).join(), /fence is indented 4 spaces/);
+    const task = parseSpec(text).tasks.find(t => t.id === 'T9');
+    assert.ok(task && !task.checked, 'T9 renders after an indented code block and is seen');
     const nested = spec({ status: 'Draft', checked: ['T1'] }).replace(
         '  * **Evidence:** [command run and its literal output]',
         '  * **Evidence:**\n    ```text\n    $ npm test\n    ok\n    ```'

@@ -261,14 +261,22 @@ test('R5: blobs are read in bounded batches, so large content never overflows th
     assert.deepStrictEqual(oids.map(o => blobs.get(o).length), [300 * 1024, 310 * 1024, 700 * 1024, 6]);
 });
 
-test('R34: only the scanner itself, known lockfiles, and node_modules segments are skipped', () => {
+test('R34: only the scanner itself and node_modules segments are skipped; lockfiles are scanned', () => {
     const repo = tempRepo();
     const leak = `k=${KEYS['AWS Access Key ID']}\n`;
-    const scanned = ['app/verify-no-secrets.js', 'lib/not_node_modules/cfg.py', 'app/deploy.lock', 'ctl.py'];
-    const skipped = ['scripts/verify-no-secrets.js', '.sdd/scripts/verify-no-secrets.js', 'web/package-lock.json', 'node_modules/x/index.js', 'pkg/node_modules/y.js'];
+    const scanned = ['app/verify-no-secrets.js', 'lib/not_node_modules/cfg.py', 'app/deploy.lock', 'ctl.py', 'web/package-lock.json', 'yarn.lock'];
+    const skipped = ['scripts/verify-no-secrets.js', '.sdd/scripts/verify-no-secrets.js', 'node_modules/x/index.js', 'pkg/node_modules/y.js'];
     writeFiles(repo, Object.fromEntries([...scanned, ...skipped].map(f => [f, leak])));
     git(repo, 'add', '-A');
     const { report } = run({ root: repo });
     for (const f of scanned) assert.ok(report.includes(f), `${f} must be scanned`);
     for (const f of skipped) assert.ok(!report.includes(`File: ${f}`), `${f} must be skipped`);
+});
+
+test('R37: a token embedded in a lockfile registry URL is caught', () => {
+    const repo = tempRepo();
+    const lock = JSON.stringify({ packages: { 'node_modules/x': { resolved: `https://x-access-token:${KEYS['GitHub Token']}@npm.pkg.github.com/x/-/x-1.0.0.tgz`, integrity: 'sha512-' + alnum(40) } } }, null, 2);
+    writeFiles(repo, { 'package-lock.json': lock });
+    git(repo, 'add', '-A');
+    assert.match(run({ root: repo }).report, /package-lock\.json/);
 });

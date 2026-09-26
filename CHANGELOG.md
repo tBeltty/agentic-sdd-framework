@@ -23,7 +23,7 @@ for recorded evidence) again before pushing a `Completed` spec.
 - `sdd-init` reuses the answers stored in an existing `sdd.config.json` as defaults; only explicit
   flags override them. The spec and Rigor documents are created at the configured
   `specification.specFile` and `specification.roadmapDir`.
-- Rigor mode requires `auditkit` 0.3.7 or newer. CI pins the protocol repository to v0.3.7.
+- Rigor mode requires `auditkit` 0.3.8 or newer. CI pins the protocol repository to v0.3.8.
 - Check scripts reject unknown flags (a typo checked the working tree instead) and accept
   `--ref <commit>` as well as `--ref=<commit>`.
 - Config paths must be canonical (`docs/SPEC.md`, not `./docs/SPEC.md`), and `specFile` and
@@ -45,23 +45,23 @@ for recorded evidence) again before pushing a `Completed` spec.
   whose newest commit completed the spec now passes; otherwise the failure explains that the full
   history is needed.
 - The spec parser read some Markdown differently from GitHub, which could hide an unchecked
-  task or swap the Status (inline and indented comments, fences left open in a list item,
-  over-indented or tab-indented fences, fences on a list-marker line (`* ~~~`, which also let
-  `sdd-verify` run a command other than the rendered one), escaped backticks, labels inside link
-  titles, multi-line link titles, HTML entities, invisible or look-alike characters in the Status,
-  blockquote markers stripped inside evidence fences (which also rejected real transcripts with
-  `>` lines), `<!-->` and tab-indented comments, email-like autolinks masking inline HTML,
-  multi-line link labels and footnotes, fields inside numbered list items, multi-line link reference
-  definitions, raw HTML blocks, Status variants such as `**Status**:`). The spec is now held to
-  a strict Markdown subset in which the parse matches the rendering (no raw HTML or comments,
-  no link definitions or footnotes), and markup outside it
-  fails with the line and the fix. Checked with a differential fuzz against a CommonMark
-  renderer (`scripts/dev/fuzz-spec-markup.js`, dev-only): no accepted spec rendered an unchecked task or a Status the parser missed.
+  task, swap the Status, or make `sdd-verify` run a command other than the rendered one (nine
+  review rounds found cases: comments, fences left open or opened on a list marker, tabs,
+  escaped backticks, link titles and definitions, footnotes, entities, invisible and look-alike
+  characters, indented code before the command). The spec is now parsed with a CommonMark
+  parser (markdown-it 14.3.2, vendored under `scripts/lib/vendor/`, MIT; no npm dependency), and
+  tasks, the Status, evidence, and the command are read from the parsed structure. A small
+  subset keeps GitHub's renderer and the parser in agreement: no raw HTML or comments, no link
+  definitions or footnotes, no entities or invisible characters, no tabs deciding indentation,
+  and the fields written exactly as in the template. `scripts/dev/fuzz-spec-markup.js` compares
+  the gate's reading with cmark-gfm (GitHub's renderer): no bypass in 300,000 random specs,
+  where the previous parser had several.
 - `sdd-verify --task` wrote evidence at 2 spaces under numbered tasks, which rendered outside
   the list item; evidence now goes at the item's content column.
-- The secret scanner skipped any file named `verify-no-secrets.js`, any `*.lock`, and any path
-  containing `node_modules/`; it now skips only its own installed paths, lockfiles by exact name,
-  and `node_modules/` path segments, as documented in the README.
+- The secret scanner skipped any file named `verify-no-secrets.js`, any lockfile, and any path
+  containing `node_modules/`; it now skips only its own installed paths and `node_modules/` path
+  segments, as documented in the README. Lockfiles are scanned: a private-registry URL can embed
+  a token.
 - Where symlinks are unavailable, the skill copies in `.claude/skills/` failed a fresh project's
   prose check; they are excluded like the `.agents/skills/` originals.
 - Plain-text values in Windows batch files (`set API_TOKEN=...`, `setx NAME value`) were not

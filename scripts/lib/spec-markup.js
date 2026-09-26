@@ -1,262 +1,266 @@
 /**
  * scripts/lib/spec-markup.js
  *
- * Markdown structure for the Lite specification parser (spec.js): which lines are HTML
- * comments or fenced code, and which markup falls outside the subset the parser follows.
+ * Reads the Lite specification the way it renders: the Markdown is parsed with a CommonMark
+ * parser (markdown-it, vendored in ./vendor), and tasks, fields, and the verification gate
+ * are taken from the token tree, so a line counts only if it renders as what it claims to be.
+ *
+ * A thin subset is enforced on top, for the places where GitHub's renderer (cmark-gfm) and
+ * markdown-it could still differ, and for text that can be disguised:
+ *   - no raw HTML (HTML comments included), no link reference definitions or footnotes;
+ *   - no HTML entities, invisible characters, or non-ASCII whitespace outside code;
+ *   - indentation with spaces, not tabs, outside code;
+ *   - Status, Verification Command, Expected Output and Last Verified are written exactly as
+ *     in the template; any other line that reads as one of them (the name followed by a
+ *     colon, or the name emphasized, at the start of a line, compared after folding case,
+ *     punctuation, and look-alike letters) is an error, as is text that reads as a task
+ *     checkbox without being one.
+ * Code (fenced or indented) is verbatim and never checked against these rules.
  */
 
-const { createFenceTracker } = require('./markdown');
+const MarkdownIt = require('./vendor/markdown-it.min.js');
 
-const TASK_RE = /^( *)(?:[*+-]|\d+[.)]) +\[( |x|X)\] +(.*)$/;
-// Indentation is spaces only, and a blank line holds only spaces or tabs (CommonMark): a
-// non-breaking space is content, not indentation.
-const indentOf = line => line.match(/^ */)[0].length;
-const isBlank = line => /^[ \t]*$/.test(line);
-const stripQuote = line => line.replace(/^( *> ?)+/, '');
+const md = new MarkdownIt('default', { html: true, linkify: false });
+// Keep entities and escapes as separate tokens (text_join would merge them into plain text
+// and hide that an entity was used).
+md.core.ruler.disable('text_join');
 
-// HTML comments are outside the supported subset (they are reported as raw HTML), so no
-// line is ever treated as hidden: the parser reads every line the author wrote.
-function commentLines(lines) {
-    return lines.map(() => false);
-}
-
-// Blanks HTML comment blocks (keeping line numbers).
-const uncommented = (lines, hidden) => lines.map((line, i) => (hidden[i] ? '' : line));
-
-// Lines that are fence delimiters or fence content. Fences are never inside blockquotes
-// (that is outside the subset), so this is computed on the raw lines.
-function fenceLines(lines, hidden = commentLines(lines)) {
-    const fence = createFenceTracker();
-    return uncommented(lines, hidden).map(line => fence.update(line) || fence.inside);
-}
-
-// Blockquote markers removed, except inside fences, whose content is verbatim.
-function unquoted(lines, hidden = commentLines(lines)) {
-    const inFence = fenceLines(lines, hidden);
-    return uncommented(lines, hidden).map((line, i) => (inFence[i] ? line : stripQuote(line)));
-}
-
-// Lines that render as content: also blanks fenced code.
-function visibleLines(lines, hidden = commentLines(lines)) {
-    const inFence = fenceLines(lines, hidden);
-    return uncommented(lines, hidden).map((line, i) => (inFence[i] ? '' : line));
-}
-
-/*
- * The specification is written in a strict subset of Markdown, in which the line-based
- * parse above matches how CommonMark and GitHub render the document. Markup outside the
- * subset is reported as a problem instead of being guessed at, because every place the
- * parser and the renderer disagree is a place to hide an unchecked task or a second Status:
- *   - indentation uses spaces, never tabs;
- *   - fences sit on their own line (never after a list or blockquote marker, as in
- *     `* ~~~`), open and close at most 3 spaces past their list item (or the margin), are
- *     always closed, hold no line indented less than the opening fence (so no list item
- *     can end inside them), and are not inside blockquotes;
- *   - backticks pair up on each line (code spans do not span lines);
- *   - no raw HTML outside code, HTML comments included (a URL is linked as plain text);
- *   - no link reference definitions or footnotes (use inline links), and a line that starts
- *     with "[" closes it on the same line;
- *   - no HTML entities, non-ASCII whitespace, or invisible characters outside code, and no
- *     link title that spans lines (all can hide or disguise text);
- *   - Status, Verification Command, Expected Output and Last Verified appear in their exact
- *     form; lines that only resemble them are errors: the field name followed by a colon, or
- *     emphasized, at the start of a line or list item, compared after folding case,
- *     punctuation, and look-alike letters.
- */
-const LIST_ITEM_RE = /^( *)([*+-]|\d{1,9}[.)])( {1,4}|$)/;
-const ESCAPABLE_RE = /[!-/:-@[-`{-~]/;
-const RAW_HTML_RE = /<(?:[A-Za-z][A-Za-z0-9-]*(?=[\s/>]|$)|\/[A-Za-z]|!|\?)/;
-// A link reference definition or footnote ("[x]: url", "[^1]: note") at the start of a line.
-const DEFINITION_RE = /^ {0,3}(?:\[\^|\[[^\]]*\]:)/;
-const LIST_MARKERS_RE = /^(?: *(?:[*+-]|\d{1,9}[.)])[ \t]+)+/;
-const FIELD_LIKE = [
-    { name: 'Status', key: 'status', exact: /^\*\*Status:\*\* / },
-    { name: 'Verification Command', key: 'verificationcommand', exact: /^\* \*\*Verification Command:\*\*/ },
-    { name: 'Expected Output', key: 'expectedoutput', exact: /^\* \*\*Expected Output:\*\*/ },
-    { name: 'Last Verified', key: 'lastverified', exact: /^\* \*\*Last Verified:\*\*/ }
-];
-const ENTITY_RE = /&(?:#[0-9]+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);/;
-// Non-ASCII whitespace and invisible or bidirectional formatting characters.
-const INVISIBLE_RE = /[\u00A0\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E\u1680\u2000-\u200F\u2028-\u202F\u205F-\u206F\u3000\u3164\uFEFF\uFFA0]/;
-// Letters that look like Latin ones (Cyrillic, Greek, Armenian), folded before comparing.
+const BOM = '\uFEFF';
+// Non-ASCII whitespace, form feed and vertical tab, and invisible or bidirectional
+// formatting characters.
+const INVISIBLE_RE = /[\f\v\u00A0\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E\u1680\u2000-\u200F\u2028-\u202F\u205F-\u206F\u3000\u3164\uFEFF\uFFA0]/;
+// Letters that look like Latin ones (Cyrillic, Greek, Armenian, IPA, small capitals), and
+// colon look-alikes, folded before comparing.
 const CONFUSABLES = new Map(Object.entries({
-    '\u0430': 'a', '\u0435': 'e', '\u043E': 'o', '\u0440': 'p', '\u0441': 'c', '\u0443': 'y', '\u0445': 'x', '\u0455': 's', '\u0456': 'i', '\u0458': 'j', '\u0501': 'd', '\u04CF': 'l', '\u0442': 't', '\u0432': 'b',
-    '\u043A': 'k', '\u043C': 'm', '\u043D': 'h', '\u057D': 'u', '\u03C5': 'u', '\u03C4': 't', '\u03B9': 'i', '\u03BF': 'o', '\u03B1': 'a', '\u03BD': 'v', '\u03BA': 'k', '\u03C1': 'p', '\u03B5': 'e',
+    '\u0430': 'a', '\u0435': 'e', '\u043E': 'o', '\u0440': 'p', '\u0441': 'c', '\u0443': 'y', '\u0445': 'x', '\u0455': 's',
+    '\u0456': 'i', '\u0458': 'j', '\u0501': 'd', '\u04CF': 'l', '\u0442': 't', '\u0432': 'b', '\u043A': 'k', '\u043C': 'm',
+    '\u043D': 'h', '\u057D': 'u', '\u03C5': 'u', '\u03C4': 't', '\u03B9': 'i', '\u03BF': 'o', '\u03B1': 'a', '\u03BD': 'v',
+    '\u03BA': 'k', '\u03C1': 'p', '\u03B5': 'e', '\u0251': 'a', '\u0261': 'g', '\u0131': 'i', '\u0237': 'j', '\u0269': 'i',
+    '\u028F': 'y', '\u1D1B': 't', '\uA731': 's', '\u1D1C': 'u', '\u1D00': 'a', '\u1D07': 'e', '\u1D0F': 'o', '\u0280': 'r',
     '\u02D0': ':', '\uA789': ':', '\u0589': ':', '\u2236': ':', '\u02F8': ':', '\u05C3': ':', '\u0703': ':', '\u0704': ':'
 }));
-// A line reduced to lowercase ASCII letters, digits and colons, look-alikes folded.
-const skeleton = line => [...line.normalize('NFKC').toLowerCase()].map(c => CONFUSABLES.get(c) || c).join('').replace(/[^a-z0-9:]/g, '');
+// A text reduced to lowercase ASCII letters, digits and colons, look-alikes folded.
+const skeleton = text => [...text.normalize('NFKC').toLowerCase()].map(c => CONFUSABLES.get(c) || c).join('').replace(/[^a-z0-9:]/g, '');
 
-// True when a line reads as the field `key` ("status", "verificationcommand", ...): the name
-// followed by a colon, or the name emphasized, at the start of the line or of a list item.
-function looksLikeField(line, key) {
-    const body = line.replace(LIST_MARKERS_RE, '');
-    if (skeleton(body).startsWith(`${key}:`)) return true;
-    const emphasized = body.match(/^([*_~]{1,3})(.+?)\1/);
-    return Boolean(emphasized) && skeleton(emphasized[2]).startsWith(key);
-}
+const FIELDS = [
+    { name: 'Status', key: 'status' },
+    { name: 'Verification Command', key: 'verificationcommand' },
+    { name: 'Expected Output', key: 'expectedoutput' },
+    { name: 'Last Verified', key: 'lastverified' }
+];
+const LIST_ITEM_RE = /^( *)([*+-]|\d{1,9}[.)])( {1,4}|$)/;
+const CHECKBOX_RE = /^\[([ xX])\](?=[ \t]|$)/;
+// A footnote definition at the start of a line, after any blockquote or list markers.
+const FOOTNOTE_RE = /^(?:[ \t]*(?:>|[*+-]|\d{1,9}[.)])?)*[ \t]*\[\^[^\]]*\]:/;
+const RAW_HTML = 'raw HTML (HTML comments included) is not supported in the specification: it can hide or change what renders. Use Markdown, or put it in a code span.';
 
-// True when a line starts with "[" that is not closed on it (a label that spans lines).
-function unclosedLeadingBracket(prose) {
-    if (!/^ {0,3}\[/.test(prose)) return false;
-    let depth = 0;
-    for (const ch of prose) {
-        if (ch === '[') depth++;
-        else if (ch === ']' && --depth === 0) return false;
-    }
-    return true;
-}
-const TASK_LIKE_RE = /^[^A-Za-z0-9[]*\[[ xX]\]/;
-// A fence after one or more list or blockquote markers on the same line ("* ~~~", "1. > ```").
-const MARKER_FENCE_RE = /^[ \t]*(?:(?:[*+-]|\d{1,9}[.)]|>)[ \t]*)+(?:`{3,}|~{3,})/;
-const FENCE_LINE_RE = /^[ \t]*(?:`{3,}|~{3,})/;
-
-// True when an inline link or image destination opened on this line ("](") is not closed on
-// it; its title would then span lines and hide them.
-function unclosedLink(prose) {
-    let from = prose.indexOf('](');
-    while (from !== -1) {
-        let depth = 1;
-        let quote = null;
-        let i = from + 2;
-        for (; i < prose.length && depth > 0; i++) {
-            const ch = prose[i];
-            if (quote) {
-                if (ch === quote) quote = null;
-            } else if (ch === '"' || ch === "'") {
-                quote = ch;
-            } else if (ch === '(') {
-                depth++;
-            } else if (ch === ')') {
-                depth--;
-            }
+// Nests the flat token stream: every *_open token becomes a node holding its children.
+function tokenTree(tokens) {
+    const root = { type: 'root', children: [], parent: null };
+    let current = root;
+    for (const token of tokens) {
+        if (token.nesting === 1) {
+            const node = { type: token.type.replace(/_open$/, ''), token, children: [], parent: current };
+            current.children.push(node);
+            current = node;
+        } else if (token.nesting === -1) {
+            current = current.parent;
+        } else {
+            current.children.push({ type: token.type, token, children: [], parent: current });
         }
-        if (depth > 0 || quote) return true;
-        from = prose.indexOf('](', i);
     }
+    return root;
+}
+
+function* walk(node) {
+    for (const child of node.children) {
+        yield child;
+        yield* walk(child);
+    }
+}
+
+function inside(node, types) {
+    for (let p = node.parent; p; p = p.parent) if (types.includes(p.type)) return true;
     return false;
 }
 
-// Content column of the list item that contains lines[at] (0 at the top level).
-function containerIndent(lines, at) {
-    let minIndent = Infinity;
-    for (let i = at - 1; i >= 0; i--) {
-        const line = lines[i];
-        if (line.trim() === '') continue;
-        const item = line.match(LIST_ITEM_RE);
-        if (item) {
-            const content = item[1].length + item[2].length + (item[3] ? item[3].length : 1);
-            if (minIndent >= content && indentOf(lines[at]) >= content) return content;
-        }
-        minIndent = Math.min(minIndent, indentOf(line));
-        if (minIndent === 0 && !item) return 0;
-    }
-    return 0;
-}
-
-// The line with code spans and backslash escapes removed, or null when a backtick run has
-// no matching run on the same line.
-function proseOf(line) {
-    let out = '';
-    let i = 0;
-    while (i < line.length) {
-        const ch = line[i];
-        if (ch === '\\' && ESCAPABLE_RE.test(line[i + 1] || '')) {
-            out += ' ';
-            i += 2;
-        } else if (ch === '`') {
-            let n = 0;
-            while (line[i + n] === '`') n++;
-            let j = i + n;
-            let close = -1;
-            while (j < line.length) {
-                if (line[j] !== '`') { j++; continue; }
-                let m = 0;
-                while (line[j + m] === '`') m++;
-                if (m === n) { close = j; break; }
-                j += m;
-            }
-            if (close === -1) return null;
-            out += ' ';
-            i = close + n;
+// The rendered text of an inline token, one entry per rendered line, with the text of an
+// emphasis that opens the line (null when the line does not open with one).
+function renderedLines(inline) {
+    const lines = [{ text: '', emphasis: null }];
+    let depth = 0;
+    let started = false;
+    for (const child of inline.children || []) {
+        const line = lines[lines.length - 1];
+        if (child.type === 'softbreak' || child.type === 'hardbreak') {
+            lines.push({ text: '', emphasis: null });
+            depth = 0;
+            started = false;
+        } else if (/^(strong|em|s)_open$/.test(child.type)) {
+            if (!started && depth === 0) line.emphasis = '';
+            depth++;
+        } else if (/^(strong|em|s)_close$/.test(child.type)) {
+            depth = Math.max(0, depth - 1);
+            if (depth === 0) started = true;
         } else {
-            out += ch;
-            i++;
+            const text = child.content || '';
+            if (line.emphasis !== null && depth > 0 && !started) line.emphasis += text;
+            if (depth === 0 && text.trim() !== '') started = true;
+            line.text += text;
         }
     }
-    return out;
+    return lines;
 }
 
-// Problems for markup outside the supported subset (see above).
-function ambiguousMarkup(lines, hidden) {
+// The field a rendered line reads as, if any.
+function fieldOf({ text, emphasis }) {
+    const shape = skeleton(text);
+    return FIELDS.find(f => shape.startsWith(`${f.key}:`) || (emphasis !== null && skeleton(emphasis).startsWith(f.key))) || null;
+}
+
+function firstInline(item) {
+    const first = item.children[0];
+    return first && first.type === 'paragraph' ? first.children.find(c => c.type === 'inline') : null;
+}
+
+function firstCode(node) {
+    for (const child of walk(node)) if (child.type === 'fence' || child.type === 'code_block') return child.token;
+    return null;
+}
+
+const codeText = token => token.content.replace(/\n$/, '');
+
+// Trims trailing blank lines from a [start, end) line range.
+function trimRange([start, end], lines) {
+    let stop = end;
+    while (stop > start + 1 && /^[ \t]*$/.test(lines[stop - 1] || '')) stop--;
+    return [start, stop];
+}
+
+function readTask(item, inline, lines) {
+    const [, mark] = inline.content.match(CHECKBOX_RE);
+    const rest = inline.content.replace(CHECKBOX_RE, '').split('\n')[0].trim();
+    const bold = rest.match(/^\*\*([A-Za-z0-9_.-]+):\*\*\s*(.*)$/);
+    const range = trimRange(item.token.map, lines);
+    const task = {
+        id: bold ? bold[1] : `line ${range[0] + 1}`,
+        line: range[0],
+        checked: mark !== ' ',
+        title: (bold ? bold[2] : rest).trim(),
+        evidence: { header: '', text: '', code: null, range: null },
+        quoted: inside(item, ['blockquote']),
+        blockEnd: range[1]
+    };
+    // Evidence: the first item of the task's own sub-lists whose text starts with the label.
+    for (const list of item.children.filter(c => c.type === 'bullet_list' || c.type === 'ordered_list')) {
+        const evidence = list.children.find(sub => {
+            const first = firstInline(sub);
+            return first && /^\*\*Evidence:\*\*/.test(first.token.content);
+        });
+        if (!evidence) continue;
+        const first = firstInline(evidence).token;
+        const [head, ...more] = first.content.split('\n');
+        const header = head.replace(/^\*\*Evidence:\*\*/, '').trim();
+        const text = [header, ...more];
+        for (const node of walk(evidence)) {
+            if (node.type === 'inline' && node.token !== first) text.push(node.token.content);
+            if (node.type === 'fence' || node.type === 'code_block') text.push(codeText(node.token));
+        }
+        const code = firstCode(evidence);
+        task.evidence = {
+            header,
+            text: text.filter(t => t.trim() !== '').join('\n').trim(),
+            code: code ? codeText(code) : null,
+            range: trimRange(evidence.token.map, lines)
+        };
+        break;
+    }
+    return task;
+}
+
+/*
+ * The specification as it renders: tasks with their evidence, the lines that read as
+ * fields, and the problems found by the subset checks. `lines` are the normalized source
+ * lines (LF; a BOM stays on line 0 so line numbers match the file).
+ */
+function readDocument(lines) {
+    const env = {};
+    const tree = tokenTree(md.parse(lines.join('\n').replace(/^\uFEFF/, ''), env));
     const problems = [];
-    const at = (i, what) => problems.push(`Line ${i + 1}: ${what}`);
-    const outside = unquoted(lines, hidden);
-    const fence = createFenceTracker();
-    let fenceContainer = 0;
-    let fenceIndent = 0;
-    const counts = Object.fromEntries(FIELD_LIKE.map(f => [f.name, 0]));
-    lines.forEach((raw, i) => {
-        // Fence content is verbatim: no blockquote stripping, spaces-only indentation.
-        const wasInside = fence.inside;
-        if (wasInside && !isBlank(raw) && indentOf(raw) < fenceIndent) {
-            at(i, `this line is inside a fence but indented less than its opening fence (${fenceIndent} spaces); Markdown may end the fence here. Indent it at least as far as the fence, or close the fence first.`);
+    const at = (line, what) => problems.push(`Line ${line + 1}: ${what}`);
+
+    // Code is verbatim: note its lines so the source checks skip them. Tabs are still
+    // checked where they decide the code's own indentation (fence lines, the columns a fence
+    // strips from its content, the margin of indented code), since renderers expand them
+    // differently there.
+    const code = new Set();
+    const tabbed = 'a tab decides the indentation of this code block, which renderers expand differently. Indent with spaces.';
+    for (const node of walk(tree)) {
+        if ((node.type !== 'fence' && node.type !== 'code_block') || !node.token.map) continue;
+        const [first, end] = node.token.map;
+        for (let i = first; i < end; i++) code.add(i);
+        if (node.type === 'code_block') {
+            for (let i = first; i < end; i++) if (/^[ >]*\t/.test(lines[i])) at(i, tabbed);
+            continue;
         }
-        if (fence.update(raw)) {
-            const container = wasInside ? fenceContainer : containerIndent(outside, i);
-            if (indentOf(raw) > container + 3) {
-                at(i, wasInside
-                    ? `this closing fence is indented ${indentOf(raw)} spaces, so Markdown treats it as code and the block stays open. Indent it at most 3 spaces past its list item.`
-                    : `this fence is indented ${indentOf(raw)} spaces, so Markdown renders it as indented code and everything after it stays visible. Indent it at most 3 spaces past its list item.`);
-            }
-            if (!wasInside) {
-                fenceContainer = container;
-                fenceIndent = indentOf(raw);
-            }
-            return;
-        }
-        if (fence.inside) return;
-        const line = stripQuote(raw);
-        const quoted = line !== raw;
-        const leading = raw.match(/^[ \t>]*/)[0];
-        if (MARKER_FENCE_RE.test(raw)) {
-            at(i, 'a fence on the same line as a list or blockquote marker is not supported. Put the fence on its own line, indented under the item.');
-        } else if (FENCE_LINE_RE.test(line) && (quoted || /\t/.test(leading))) {
-            at(i, quoted ? 'fences inside blockquotes are not supported. Move the fence out of the blockquote.' : 'fences must be indented with spaces, not tabs.');
-        }
-        if (/\t/.test(leading)) at(i, 'indent with spaces, not tabs (Markdown expands a tab to 4 columns).');
-        if (INVISIBLE_RE.test(raw)) at(i, 'non-ASCII whitespace or an invisible character can disguise text. Use plain spaces and remove invisible characters.');
-        const prose = proseOf(line);
-        if (prose === null) {
-            at(i, 'a backtick code span is not closed on the same line. Close it on this line, or escape the backtick as \\`.');
-            return;
-        }
-        if (RAW_HTML_RE.test(prose)) {
-            at(i, 'raw HTML (HTML comments included) is not supported in the specification: it can hide or change what renders. Use Markdown, or put it in a code span.');
-        }
-        if (ENTITY_RE.test(prose)) at(i, 'HTML entities (such as &#116;) can disguise text. Write the character itself.');
-        if (unclosedLink(prose)) at(i, 'an inline link or image is not closed on this line; its title would hide the lines after it.');
-        if (DEFINITION_RE.test(prose) || unclosedLeadingBracket(prose)) {
-            at(i, 'link reference definitions and footnotes are not supported (they render nothing and can hide lines). Use an inline link: [text](url).');
-        }
-        for (const field of FIELD_LIKE) {
-            if (!looksLikeField(line, field.key)) continue;
-            counts[field.name]++;
-            if (!field.exact.test(line) || quoted) at(i, `write the ${field.name} line exactly as in the template ("${field.name === 'Status' ? '**Status:** <value>' : `* **${field.name}:**`}" at the start of the line, outside blockquotes).`);
-        }
-        const trimmed = line.trim();
-        if (TASK_LIKE_RE.test(trimmed) && !TASK_RE.test(line)) {
-            at(i, 'this looks like a task but is not a list item ("* [ ] **T1:** ..."), so it is not checked. Fix the list marker or remove the brackets.');
-        }
-    });
-    if (fence.inside) problems.push('A fence is never closed. Close every fence with a matching line of backticks or tildes.');
-    for (const field of FIELD_LIKE.slice(1)) {
-        if (counts[field.name] > 1) problems.push(`${counts[field.name]} "${field.name}" lines; keep exactly one, in the Verification Gate section.`);
+        const indent = lines[first].match(/^[ >]*/)[0].length;
+        if (/^[ >]*\t/.test(lines[first]) || /^[ >]*\t/.test(lines[end - 1] || '')) at(first, tabbed);
+        for (let i = first + 1; i < end - 1; i++) if (lines[i].slice(0, indent).includes('\t')) at(i, tabbed);
     }
-    return problems;
+    lines.forEach((line, i) => {
+        if (code.has(i)) return;
+        const text = i === 0 && line.startsWith(BOM) ? line.slice(1) : line;
+        if (/^[ >]*\t/.test(text)) at(i, 'indent with spaces, not tabs (Markdown expands a tab to 4 columns).');
+        if (INVISIBLE_RE.test(text)) at(i, 'non-ASCII whitespace or an invisible character can disguise text. Use plain spaces and remove invisible characters.');
+        // GitHub's footnotes can interrupt a paragraph, where markdown-it reads plain text.
+        if (FOOTNOTE_RE.test(text)) at(i, 'footnotes are not supported (GitHub and the parser read them differently). Use an inline link or a sentence.');
+    });
+    const references = Object.keys(env.references || {});
+    if (references.length > 0) {
+        problems.push(`Link reference definitions and footnotes are not supported (they render nothing and can hide lines): ${references.map(r => `[${r}]`).join(', ')}. Use inline links: [text](url).`);
+    }
+
+    const tasks = [];
+    const fieldLines = [];
+    for (const node of walk(tree)) {
+        if (node.type === 'html_block') at(node.token.map[0], RAW_HTML);
+        if (node.type !== 'inline') continue;
+        const inline = node.token;
+        const start = inline.map[0];
+        for (const child of inline.children || []) {
+            if (child.type === 'html_inline') at(start, RAW_HTML);
+            if (child.info === 'entity') at(start, `HTML entities (such as ${child.markup}) can disguise text. Write the character itself.`);
+        }
+        const paragraph = node.parent.type === 'paragraph' ? node.parent : null;
+        const item = paragraph && paragraph.parent.type === 'list_item' && paragraph.parent.children[0] === paragraph ? paragraph.parent : null;
+        const isTask = Boolean(item) && CHECKBOX_RE.test(inline.content);
+        const sourceLines = inline.content.split('\n');
+        renderedLines(inline).forEach((rendered, k) => {
+            const field = fieldOf(rendered);
+            if (field) fieldLines.push({ field, node, item: k === 0 ? item : null, line: start + k, source: (sourceLines[k] || '').trimEnd(), rendered });
+            if (!(isTask && k === 0) && /^\s*\[[ xX]\]/.test(rendered.text)) {
+                at(start + k, 'this reads as a task checkbox but is not the first line of a list item ("* [ ] **T1:** ..."), so it is not a task. Fix the list marker or remove the brackets.');
+            }
+        });
+        if (isTask) tasks.push(readTask(item, inline, lines));
+    }
+    return { tree, tasks, fieldLines, problems };
 }
 
-module.exports = {
-    TASK_RE, LIST_ITEM_RE, FIELD_LIKE, indentOf, isBlank, stripQuote, skeleton, commentLines, uncommented, unquoted, visibleLines,
-    ambiguousMarkup
-};
+// The "Verification Gate" section: its top-level nodes and its [from, to) line range.
+function gateSection(tree, lines) {
+    const top = tree.children;
+    const heading = n => n.type === 'heading';
+    const start = top.findIndex(n => heading(n) && n.token.tag === 'h2'
+        && /^(?:\d+\.\s*)?Verification Gate\b/i.test(n.children[0].token.content));
+    if (start === -1) return null;
+    let end = top.findIndex((n, i) => i > start && heading(n) && Number(n.token.tag.slice(1)) <= 2);
+    if (end === -1) end = top.length;
+    return {
+        nodes: top.slice(start + 1, end),
+        from: top[start].token.map[0],
+        to: end < top.length ? top[end].token.map[0] : lines.length
+    };
+}
+
+module.exports = { LIST_ITEM_RE, FIELDS, skeleton, readDocument, gateSection, firstCode, codeText, walk, inside };

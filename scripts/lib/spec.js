@@ -4,15 +4,12 @@
  * Parser and writers for the Lite Mode specification (docs/SPEC.md, from
  * docs/SPEC_TEMPLATE.md): status, task checklist with evidence, verification gate.
  *
- * Any checkbox list item is a task (bullets or numbered, also inside blockquotes); its ID
- * is the bold `**T1:**` prefix when present, otherwise "line N". Content inside fenced code
- * blocks and HTML comment blocks (a line starting with `<!--`, up to the line with `-->`) is
- * ignored, as it is when the Markdown is rendered. Markup whose rendering the parser cannot
- * follow exactly is reported as a problem instead of being guessed: a comment block that
- * holds spec structure (a task, Status, a gate field, or a code fence), an inline `<!--`
- * without `-->` on the same line, <script>/<style>/<textarea>-like tags, and a fence
- * indented so far that CommonMark renders it as indented code. Line endings are normalized
- * before parsing and preserved when writing.
+ * The spec is read as it renders (see spec-markup.js): a task is a list item whose first
+ * paragraph starts with a checkbox (bullets or numbered, also inside blockquotes); its ID is
+ * the bold `**T1:**` prefix when present, otherwise "line N". Its evidence is the
+ * `**Evidence:**` item of its sub-list, and the command is the first code block rendered in
+ * the `**Verification Command:**` item. Markup outside the supported subset is reported as a
+ * problem. Line endings are normalized before parsing and preserved when writing.
  *
  * Records written by sdd-verify carry integrity hashes: task evidence covers its date, exit
  * code and transcript; "Last Verified" covers every field plus the verification command and
@@ -22,10 +19,8 @@
  */
 
 const crypto = require('crypto');
-const { normalizeEol, detectEol, createFenceTracker } = require('./markdown');
-const {
-    TASK_RE, LIST_ITEM_RE, FIELD_LIKE, indentOf, isBlank, stripQuote, commentLines, uncommented, unquoted, visibleLines, ambiguousMarkup
-} = require('./spec-markup');
+const { normalizeEol, detectEol } = require('./markdown');
+const { LIST_ITEM_RE, readDocument, gateSection, firstCode, codeText } = require('./spec-markup');
 
 const STATUSES = ['draft', 'in progress', 'completed'];
 
@@ -35,11 +30,10 @@ const STATUSES = ['draft', 'in progress', 'completed'];
 const isPlaceholder = text => /^\[[^\]]*\]$/.test(text.trim());
 
 const TEMPLATE_STATUS = 'Draft | In Progress | Completed';
-const FIELD_RE = /^(\s*)[*+-]\s+\*\*([^*]+):\*\*\s*(.*)$/;
-const LAST_VERIFIED_RE = /^\s*[*+-]\s+\*\*Last Verified:\*\*\s*(.*)$/;
 const LAST_VERIFIED_VALUE_RE =
     /^(\d{4}-\d{2}-\d{2}) (PASS|FAIL) \(commit ([^,()]+), exit ([^,()]+), state ([0-9a-f]{16}), check ([0-9a-f]{16})\)$/;
 const RECORDED_EVIDENCE_RE = /^sdd-verify (\d{4}-\d{2}-\d{2}), exit (-?\d+|timeout|signal \w+), sha256 ([0-9a-f]{16})$/;
+const GATE_FIELDS = ['Verification Command', 'Expected Output', 'Last Verified'];
 
 const shortHash = text => crypto.createHash('sha256').update(text).digest('hex').slice(0, 16);
 
@@ -53,107 +47,6 @@ function lastVerifiedCheck({ date, result, commit, exit, state }, command, expec
     return shortHash([date, result, commit, exit, state, command, expected].join('\n'));
 }
 
-// Content of the first fenced block within lines[from, to), dedented to its fence.
-function firstFence(lines, from, to) {
-    const fence = createFenceTracker();
-    let open = -1;
-    for (let i = from; i < to; i++) {
-        if (!fence.update(lines[i])) continue;
-        if (open === -1) {
-            open = i;
-        } else {
-            const indent = indentOf(lines[open]);
-            return lines.slice(open + 1, i)
-                .map(l => (l.slice(0, indent).trim() === '' ? l.slice(indent) : l))
-                .join('\n');
-        }
-    }
-    return null;
-}
-
-function parseStatus(visible) {
-    const found = visible.map(l => l.match(/^\*\*Status:\*\*\s*(.+?)\s*$/)).filter(Boolean);
-    if (found.length === 0) return { status: null, problem: 'No "**Status:**" line.' };
-    if (found.length > 1) return { status: null, problem: `${found.length} "**Status:**" lines; keep exactly one.` };
-    const raw = found[0][1];
-    if (raw === TEMPLATE_STATUS) return { status: null, problem: null }; // untouched template
-    const value = raw.toLowerCase();
-    if (STATUSES.includes(value)) return { status: value, problem: null };
-    return { status: null, problem: `Unknown status "${raw}". Use Draft, In Progress, or Completed.` };
-}
-
-function gateBounds(lines) {
-    const start = lines.findIndex(l => /^##\s+(?:\d+\.\s*)?Verification Gate\b/i.test(l));
-    if (start === -1) return null;
-    const next = lines.findIndex((l, i) => i > start && /^##\s/.test(l));
-    return [start, next === -1 ? lines.length : next];
-}
-
-function parseEvidence(lines, fieldIndex, end) {
-    const header = stripQuote(lines[fieldIndex]).match(FIELD_RE)[3].trim();
-    const content = firstFence(lines, fieldIndex + 1, end);
-    const body = lines.slice(fieldIndex + 1, end).map(l => l.trim()).filter(l => l && !/^(`{3,}|~{3,})/.test(l)).join('\n');
-    const text = [isPlaceholder(header) ? '' : header, body].filter(Boolean).join('\n').trim();
-    const recordedMatch = header.match(RECORDED_EVIDENCE_RE);
-    const recorded = recordedMatch
-        ? {
-            date: recordedMatch[1],
-            exit: recordedMatch[2],
-            hash: recordedMatch[3],
-            intact: content !== null && evidenceHash(recordedMatch[1], recordedMatch[2], content) === recordedMatch[3]
-        }
-        : null;
-    return { text, recorded, range: [fieldIndex, end] };
-}
-
-function parseTasks(rawLines) {
-    const tasks = [];
-    // Task detection runs on rendered content, with blockquote markers removed.
-    const hidden = commentLines(rawLines);
-    const lines = visibleLines(rawLines, hidden).map(stripQuote);
-    // Evidence fences are read verbatim: blockquote markers are only removed outside fences.
-    const source = unquoted(rawLines, hidden);
-    for (let i = 0; i < lines.length; i++) {
-        const match = lines[i].match(TASK_RE);
-        if (!match) continue;
-        const indent = match[1].length;
-        const bold = match[3].match(/^\*\*([A-Za-z0-9_.-]+):\*\*\s*(.*)$/);
-        const task = {
-            id: bold ? bold[1] : `line ${i + 1}`,
-            line: i,
-            checked: match[2] !== ' ',
-            title: (bold ? bold[2] : match[3]).trim(),
-            evidence: { text: '', recorded: null, range: null },
-            quoted: /^\s*>/.test(rawLines[i])
-        };
-        // The task block: following lines indented deeper than the checkbox (or blank).
-        let end = i + 1;
-        const inner = createFenceTracker();
-        while (end < source.length) {
-            const line = source[end];
-            const delimiter = inner.update(line);
-            if (!delimiter && !inner.inside && !isBlank(line) && indentOf(line) <= indent) break;
-            end++;
-        }
-        while (end > i + 1 && isBlank(source[end - 1])) end--;
-        // Fields inside the block; the Evidence field runs until the next field or the end.
-        const fields = [];
-        for (let j = i + 1; j < end; j++) {
-            const field = lines[j].match(FIELD_RE);
-            if (field && indentOf(lines[j]) > indent) fields.push({ name: field[2].trim().toLowerCase(), index: j });
-        }
-        const evidenceAt = fields.findIndex(f => f.name === 'evidence');
-        if (evidenceAt !== -1) {
-            const next = fields[evidenceAt + 1];
-            // Evidence content (fences included) is read from the unrendered lines.
-            task.evidence = parseEvidence(source, fields[evidenceAt].index, next ? next.index : end);
-        }
-        task.blockEnd = end;
-        tasks.push(task);
-    }
-    return tasks;
-}
-
 function parseLastVerified(value) {
     const match = value.match(LAST_VERIFIED_VALUE_RE);
     if (!match) return null;
@@ -165,38 +58,92 @@ function formatLastVerified(fields, command, expected) {
     return `${fields.date} ${fields.result} (commit ${fields.commit}, exit ${fields.exit}, state ${fields.state}, check ${check})`;
 }
 
+// The Status: exactly one line reads as a Status, written "**Status:** <value>" in a
+// top-level paragraph. Its value is taken as rendered.
+function readStatus(fieldLines, problems) {
+    const found = fieldLines.filter(f => f.field.name === 'Status');
+    if (found.length === 0) return { status: null, problem: 'No "**Status:**" line.' };
+    if (found.length > 1) {
+        return { status: null, problem: `${found.length} lines read as a Status (lines ${found.map(f => f.line + 1).join(', ')}); keep exactly one.` };
+    }
+    const [line] = found;
+    const topLevel = line.node.parent.type === 'paragraph' && line.node.parent.parent.type === 'root';
+    if (!topLevel || !/^\*\*Status:\*\* \S/.test(line.source)) {
+        problems.push(`Line ${line.line + 1}: write the Status line exactly as in the template ("**Status:** <value>" at the start of a line, outside lists and blockquotes).`);
+        return { status: null, problem: null };
+    }
+    const text = line.rendered.text;
+    const raw = text.slice(text.indexOf(':') + 1).trim();
+    if (raw === TEMPLATE_STATUS) return { status: null, problem: null }; // untouched template
+    const value = raw.toLowerCase();
+    if (STATUSES.includes(value)) return { status: value, problem: null };
+    return { status: null, problem: `Unknown status "${raw}". Use Draft, In Progress, or Completed.` };
+}
+
+// The gate fields: each one at most once, as a top-level list item of the Verification Gate
+// section that starts with "**<Field>:**". Returns the list item node of each.
+function readGateFields(fieldLines, section, problems) {
+    const items = {};
+    for (const name of GATE_FIELDS) {
+        const found = fieldLines.filter(f => f.field.name === name);
+        if (found.length > 1) problems.push(`${found.length} lines read as "${name}" (lines ${found.map(f => f.line + 1).join(', ')}); keep exactly one, in the Verification Gate section.`);
+        for (const line of found) {
+            const list = line.item && line.item.parent;
+            const exact = line.item && section && section.nodes.includes(list) && line.source.startsWith(`**${name}:**`);
+            if (!exact) {
+                problems.push(`Line ${line.line + 1}: write the ${name} line exactly as in the template ("* **${name}:**" as a top-level list item of the Verification Gate section).`);
+            } else if (found.length === 1) {
+                items[name] = line;
+            }
+        }
+    }
+    return items;
+}
+
 function parseSpec(rawText) {
-    const text = normalizeEol(rawText);
-    const lines = text.split('\n');
-    const hidden = commentLines(lines);
-    const visible = visibleLines(lines, hidden);
-    // The gate is read from rendered lines: a fence inside a comment is never the command.
-    const shown = uncommented(lines, hidden);
-    const bounds = gateBounds(visible);
+    const lines = normalizeEol(rawText).split('\n');
+    const doc = readDocument(lines);
+    const problems = [...doc.problems];
+    const section = gateSection(doc.tree, lines);
+    const fields = readGateFields(doc.fieldLines, section, problems);
     let gate = null;
-    if (bounds) {
-        const [from, to] = bounds;
-        // Labels count only in their exact form at the start of a rendered line.
-        const labelAt = name => visible.findIndex((l, i) => i >= from && i < to && FIELD_LIKE.find(f => f.name === name).exact.test(l));
-        const commandAt = labelAt('Verification Command');
-        const expectedAt = labelAt('Expected Output');
-        const command = commandAt === -1 ? null : firstFence(shown, commandAt + 1, to);
-        const expected = expectedAt === -1 ? null : firstFence(shown, expectedAt + 1, to);
-        const lastIndex = visible.findIndex((l, i) => i >= from && i < to && LAST_VERIFIED_RE.test(l));
-        const lastValue = lastIndex === -1 ? '' : lines[lastIndex].match(LAST_VERIFIED_RE)[1].trim();
+    if (section) {
+        const codeOf = name => {
+            const code = fields[name] ? firstCode(fields[name].item) : null;
+            return code ? codeText(code) : null;
+        };
+        const command = codeOf('Verification Command');
+        const expected = codeOf('Expected Output');
+        const last = fields['Last Verified'];
+        const lastValue = last ? last.source.slice('**Last Verified:**'.length).trim() : '';
         gate = {
             command: command && !isPlaceholder(command) ? command.trim() : '',
             expected: expected && !isPlaceholder(expected) ? expected.trim() : '',
             lastVerified: lastValue && !isPlaceholder(lastValue) ? lastValue : '',
-            lastVerifiedParsed: parseLastVerified(lastValue)
+            lastVerifiedParsed: parseLastVerified(lastValue),
+            lastVerifiedLine: last ? last.line : null
         };
         if (gate.lastVerifiedParsed) {
             gate.lastVerifiedParsed.intact =
                 lastVerifiedCheck(gate.lastVerifiedParsed, gate.command, gate.expected) === gate.lastVerifiedParsed.check;
         }
     }
-    const { status, problem } = parseStatus(visible);
-    return { status, statusProblem: problem, tasks: parseTasks(lines), gate, hiddenProblems: ambiguousMarkup(lines, hidden) };
+    const tasks = doc.tasks.map(task => {
+        const { header, code, range } = task.evidence;
+        const text = isPlaceholder(header) ? task.evidence.text.replace(header, '').trim() : task.evidence.text;
+        const recordedMatch = header.match(RECORDED_EVIDENCE_RE);
+        const recorded = recordedMatch
+            ? {
+                date: recordedMatch[1],
+                exit: recordedMatch[2],
+                hash: recordedMatch[3],
+                intact: code !== null && evidenceHash(recordedMatch[1], recordedMatch[2], code) === recordedMatch[3]
+            }
+            : null;
+        return { ...task, evidence: { text, recorded, range } };
+    });
+    const { status, problem } = readStatus(doc.fieldLines, problems);
+    return { status, statusProblem: problem, tasks, gate, gateRange: section ? [section.from, section.to] : null, hiddenProblems: problems };
 }
 
 function withEol(original, normalizedLines) {
@@ -206,18 +153,16 @@ function withEol(original, normalizedLines) {
 // Adds or replaces the "Last Verified" bullet inside the verification gate section.
 function withLastVerified(rawText, value) {
     const lines = normalizeEol(rawText).split('\n');
-    const visible = visibleLines(lines);
-    const bounds = gateBounds(visible);
-    if (!bounds) throw new Error('No "Verification Gate" section found.');
-    const [from, to] = bounds;
-    const bullet = `* **Last Verified:** ${value}`;
-    const existing = visible.findIndex((l, i) => i >= from && i < to && LAST_VERIFIED_RE.test(l));
-    if (existing !== -1) {
-        lines[existing] = bullet;
+    const spec = parseSpec(rawText);
+    if (!spec.gateRange) throw new Error('No "Verification Gate" section found.');
+    if (spec.gate.lastVerifiedLine !== null) {
+        const at = spec.gate.lastVerifiedLine;
+        lines[at] = lines[at].replace(/\*\*Last Verified:\*\*.*$/, `**Last Verified:** ${value}`);
     } else {
+        const [from, to] = spec.gateRange;
         let insertAt = to;
         while (insertAt > from + 1 && lines[insertAt - 1].trim() === '') insertAt--;
-        lines.splice(insertAt, 0, bullet);
+        lines.splice(insertAt, 0, `* **Last Verified:** ${value}`);
     }
     return withEol(rawText, lines);
 }
@@ -241,7 +186,7 @@ function formatRecordedEvidence({ date, exit, transcript, indent }) {
 // Replaces (or adds) the Evidence field of a task and checks its box.
 function withTaskEvidence(rawText, taskId, evidence) {
     const lines = normalizeEol(rawText).split('\n');
-    const task = parseTasks(lines).find(t => t.id === taskId);
+    const task = parseSpec(rawText).tasks.find(t => t.id === taskId);
     if (!task) throw new Error(`Task ${taskId} not found in the specification.`);
     if (task.quoted) throw new Error(`Task ${taskId} is inside a blockquote; move it out before recording evidence.`);
     // Evidence goes at the item's content column ("* " is 2, "1. " is 3, "10. " is 4), so
@@ -257,7 +202,7 @@ function withTaskEvidence(rawText, taskId, evidence) {
     } else {
         lines.splice(task.blockEnd, 0, ...block);
     }
-    lines[task.line] = lines[task.line].replace(/\[( )\]/, '[x]');
+    lines[task.line] = lines[task.line].replace(/^( *(?:[*+-]|\d{1,9}[.)]) +)\[ \]/, '$1[x]');
     return withEol(rawText, lines);
 }
 
