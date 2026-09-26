@@ -111,6 +111,7 @@ Flags take `--flag=value` or `--flag value`. Unknown flags are an error.
 | `--name=<name>` | Project name | Target directory name |
 | `--runtime=<id>` | `node-24-lts`, `go-1.23`, `python-3.12`, ... | `node-24-lts` |
 | `--mode=<mode>` | `lite`, `rigor` | `lite` |
+| `--rules=<selection>` | `all`, `critical`, `none` (constitution rules to include; see the Constitution check row below) | `all` |
 | `--ast=<adapter>` | `ast-grep`, `graphify`, `ripgrep`, `lsp` | `ast-grep` |
 | `--concurrency=`, `--hardware=`, `--workload=` | Discovery answers recorded in ADR-0001 | Small internal service |
 | `--i18n`, `--pwa` | Enable the capability flags | Disabled |
@@ -160,7 +161,10 @@ Unknown flags are errors. A check that cannot read the repository fails loudly i
 | No-AI-Slop copy linter | Rejects generic AI-written prose patterns |
 | File size limit | `architecture.maxLocPerFile` |
 | Specification check | Status, evidence, and verification gate rules (see below) |
+| Constitution check | Non-blocking: 3 severity levels based on which of the 8 default rules are fulfilled (see below) |
 | Version sync | `package.json` and `sdd.config.json` versions match (framework repo only) |
+
+**Constitution check** never fails the gate. Neither the rule count nor the "why this rule exists" rationale is mandatory, and a project can deliberately ship with none of the 8 default rules, or with entirely custom ones. The wizard's 8 defaults split into 3 critical (verification, secrets, scope) and 5 moderate suggestions; `sdd-init --rules=all|critical|none` (or the guided prompt) picks which ship, and each already carries real rationale, not a placeholder. The gate reads three outcomes: all 3 critical + 5 moderate present is silent (✅), all 3 critical present with some moderate missing is a light note (💡, optional), and a missing critical rule or an empty constitution is a warning (⚠️); none of them block the push. A rule is "present" only through its `<!-- sdd:rule id="..." tier="..." -->` tag, never by matching heading text, so an expert can replace a default with their own equivalent (`sdd-add-rule --fulfills=<id>`) and the gate still recognizes it. Add a rule after day-0 with `sdd-add-rule --title <t> --rule <r> --why <w>`, the sanctioned way to record a rule, instead of an agent writing "always do X" into memory, `CLAUDE.md`, or an unrelated doc the gate never reads.
 
 **Specification check, Lite mode:** exactly one Status line (`Draft`, `In Progress`, `Completed`); every checked task has recorded, unedited evidence; `In Progress`/`Completed` need a real verification command and expected output; `Completed` needs every task checked and an unedited PASS from `sdd-verify --record` matching the current file state. **Rigor mode:** `auditkit lint docs/roadmap` exits 0.
 

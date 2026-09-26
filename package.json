@@ -26,6 +26,8 @@
     "check:slop": "node scripts/check-copy-slop.js",
     "check:size": "node scripts/check-file-size.js",
     "check:spec": "node scripts/check-spec.js",
+    "check:constitution": "node scripts/check-constitution.js",
+    "add-rule": "node scripts/sdd-add-rule.js",
     "check:versions": "node scripts/check-versions.js",
     "install-hooks": "node scripts/install-git-hooks.js",
     "quality-gate": "node scripts/quality-gate.js"

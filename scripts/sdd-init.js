@@ -18,6 +18,7 @@
  *   --mode=lite|rigor     Specification depth (default: lite)
  *   --ast=<adapter>       ast-grep | graphify | ripgrep | lsp (default: ast-grep)
  *   --concurrency=, --hardware=, --workload=   Discovery answers
+ *   --rules=all|critical|none   Constitution rules to include (default: all)
  *   --i18n, --pwa         Enable the matching capability flags
  *   --force               Refresh copied skills and templates in install mode
  *   --help                Print this help
@@ -30,12 +31,12 @@ const { execFileSync, spawnSync } = require('child_process');
 const { FRAMEWORK_ROOT, provision } = require('./lib/provision');
 const { loadConfig, getIn } = require('./lib/config');
 
-const VALUE_FLAGS = ['target', 'name', 'runtime', 'mode', 'ast', 'concurrency', 'hardware', 'workload'];
+const VALUE_FLAGS = ['target', 'name', 'runtime', 'mode', 'ast', 'concurrency', 'hardware', 'workload', 'rules'];
 const BOOLEAN_FLAGS = ['express', 'i18n', 'pwa', 'force', 'help'];
 const USAGE = `Usage: sdd-init [--express] [--target=<dir>] [--name=<name>] [--runtime=<id>]
                 [--mode=lite|rigor] [--ast=ast-grep|graphify|ripgrep|lsp]
                 [--concurrency=<text>] [--hardware=<text>] [--workload=<text>]
-                [--i18n] [--pwa] [--force] [--help]`;
+                [--rules=all|critical|none] [--i18n] [--pwa] [--force] [--help]`;
 
 function parseArgs(argv) {
     const values = new Map();
@@ -175,8 +176,15 @@ async function runGuidedMode() {
     const astDefault = Object.keys(astAdapters).find(key => astAdapters[key] === EXISTING.astAdapter) || '1';
     const astAdapter = astAdapters[await ask('Select AST Adapter (1-4)', astDefault)] || 'ast-grep';
 
+    console.log('\n--- Step 6: Constitution Rules ---');
+    console.log('  [1] All 8 (default): 3 critical + 5 moderate suggestions.');
+    console.log('  [2] Critical only: verification, secrets, and scope -- the 3 the framework leans on most.');
+    console.log('  [3] None: start from a blank constitution.');
+    const ruleChoices = { '1': 'all', '2': 'critical', '3': 'none' };
+    const rules = ruleChoices[await ask('Select Rules (1-3)', '1')] || 'all';
+
     rl.close();
-    bootstrap({ projectName, runtime, specMode, astAdapter, concurrency, hardware, workload, i18n, pwa });
+    bootstrap({ projectName, runtime, specMode, astAdapter, rules, concurrency, hardware, workload, i18n, pwa });
 }
 
 function runExpressMode() {
@@ -187,6 +195,7 @@ function runExpressMode() {
         runtime: getArgValue('runtime', DEFAULTS.runtime),
         specMode: getArgValue('mode', EXISTING.specMode || 'lite').toLowerCase(),
         astAdapter: getArgValue('ast', EXISTING.astAdapter || 'ast-grep').toLowerCase(),
+        rules: getArgValue('rules', 'all').toLowerCase(),
         concurrency: getArgValue('concurrency', DEFAULTS.concurrency),
         hardware: getArgValue('hardware', DEFAULTS.hardware),
         workload: getArgValue('workload', DEFAULTS.workload),
@@ -218,7 +227,9 @@ function bootstrap(answers) {
         console.log('     were left untouched, so agents will not load the rules until you add to them:');
         console.log('     "Before any task, read .agents/AGENTS.md and .agents/CONTEXT.md."');
     }
-    console.log('  2. Record the incident or rationale behind each rule in .agents/AGENTS.md.');
+    const toolDir = result.gateCommand.replace(/^node /, '').replace(/\/quality-gate\.js$/, '');
+    console.log('  2. Optional: record the incident or rationale behind each rule in .agents/AGENTS.md.');
+    console.log(`     Add a new rule later with node ${toolDir}/sdd-add-rule.js, not memory or another doc.`);
     const { specification = {} } = result.config;
     if (answers.specMode === 'lite') {
         console.log(`  3. Define your tasks in ${specification.specFile || 'docs/SPEC.md'} and implement with verifiable gates.`);

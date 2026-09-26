@@ -15,6 +15,7 @@ const fs = require('fs');
 const path = require('path');
 const { install: installHook } = require('../install-git-hooks');
 const { validateConfig, getIn } = require('./config');
+const { CRITICAL_IDS } = require('./constitution-rules');
 
 const FRAMEWORK_ROOT = path.resolve(__dirname, '..', '..');
 const MANAGED_MARKER = 'sdd:managed';
@@ -23,10 +24,12 @@ const MANAGED_MARKER = 'sdd:managed';
 const COPY_MARKER = '.sdd-managed-copy';
 const SPEC_MODES = ['lite', 'rigor'];
 const AST_ADAPTERS = ['ast-grep', 'graphify', 'ripgrep', 'lsp'];
+const RULE_SELECTIONS = ['all', 'critical', 'none'];
 const TOOL_DIR = '.sdd/scripts';
 const TOOL_FILES = [
     'quality-gate.js', 'verify-no-secrets.js', 'check-copy-slop.js', 'check-file-size.js', 'check-spec.js',
-    'check-versions.js', 'check-system-prerequisites.js', 'install-git-hooks.js', 'sdd-verify.js', 'lib'
+    'check-constitution.js', 'check-versions.js', 'check-system-prerequisites.js', 'install-git-hooks.js',
+    'sdd-verify.js', 'sdd-add-rule.js', 'lib'
 ];
 const TEMPLATES = [
     '.agents/AGENTS.template.md',
@@ -85,12 +88,38 @@ function normalizeAnswers(answers) {
     if (!AST_ADAPTERS.includes(answers.astAdapter)) {
         throw new Error(`Unknown AST adapter "${answers.astAdapter}". Valid: ${AST_ADAPTERS.join(', ')}.`);
     }
-    return { ...answers, specMode };
+    const rules = answers.rules || 'all';
+    if (!RULE_SELECTIONS.includes(rules)) {
+        throw new Error(`Unknown rules selection "${answers.rules}". Valid: ${RULE_SELECTIONS.join(', ')}.`);
+    }
+    return { ...answers, specMode, rules };
+}
+
+// Keeps or drops the wizard's 8 default rule blocks in .agents/AGENTS.md, tagged
+// "<!-- sdd:rule id="..." tier="..." -->" in the template, and renumbers what remains.
+// A block without a tag (hand-written, added later) is always kept -- this only ever
+// touches the day-0 defaults. Neither the rule count nor "why this rule exists" is
+// mandatory; "all" (default) and "none" are both valid choices, made once, on purpose.
+function filterConstitution(text, selection) {
+    if (selection === 'all') return text;
+    const keepIds = selection === 'critical' ? new Set(CRITICAL_IDS) : new Set();
+    const SEP = '\n\n---\n\n';
+    const [header, ...blocks] = text.split(SEP);
+    const kept = blocks.filter(block => {
+        const tag = block.match(/<!--\s*sdd:rule\s+id="([\w-]+)"/);
+        return !tag || keepIds.has(tag[1]);
+    });
+    let n = 0;
+    const renumbered = kept.map(block => block.replace(/^## \d+\./m, () => `## ${++n}.`));
+    return [header, ...renumbered].join(SEP);
 }
 
 function buildConfig(answers, existing) {
+    // No default architecture style: the strategic-cto skill's discovery interview decides
+    // this per project (see ADR-0001), and "clean-architecture" for every new project was a
+    // claim nobody actually made.
     const defaults = {
-        architecture: { style: 'clean-architecture', maxLocPerFile: 400 },
+        architecture: { style: 'Not yet decided (see docs/decisions/ADR-0001-stack-and-architecture.md)', maxLocPerFile: 400 },
         capabilities: { noAiSlop: { enabled: true } }
     };
     const generated = {
@@ -173,7 +202,8 @@ function renderEntrypoint(answers, gateCommand, config) {
         AST_ADAPTER: answers.astAdapter,
         RUNTIME: answers.runtime,
         SPEC_MODE: answers.specMode,
-        GATE_COMMAND: gateCommand
+        GATE_COMMAND: gateCommand,
+        ADD_RULE_COMMAND: `node ${toolDir}/sdd-add-rule.js`
     };
     const template = fs.readFileSync(path.join(FRAMEWORK_ROOT, '.agents/ENTRYPOINT.template.md'), 'utf8');
     return Object.entries(values).reduce((out, [key, value]) => replaceLiteral(out, `{{${key}}}`, value), template);
@@ -252,7 +282,7 @@ function provision(rawAnswers, { target = process.cwd(), force = false, log = co
     record(existingConfig ? 'updated' : 'created', 'sdd.config.json');
 
     // 3. Governance documents.
-    createFromTemplate('.agents/AGENTS.template.md', '.agents/AGENTS.md');
+    createFromTemplate('.agents/AGENTS.template.md', '.agents/AGENTS.md', t => filterConstitution(t, answers.rules));
     createFromTemplate('.agents/CONTEXT.template.md', '.agents/CONTEXT.md', t => fillContext(t, answers, config));
     // Documents go where the config says, so the gate checks the files sdd-init created.
     const specFile = getIn(config, 'specification.specFile', 'docs/SPEC.md');

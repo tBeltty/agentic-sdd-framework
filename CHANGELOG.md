@@ -8,6 +8,15 @@ with `npx github:tBeltty/agentic-sdd-framework#v<version>`.
 
 ## [Unreleased]
 
+### Added
+- Constitution check: a non-blocking gate step that warns when a critical constitution rule is missing or the constitution is empty.
+- `sdd-init --rules=all|critical|none` to choose which default constitution rules the wizard writes.
+- `sdd-add-rule` to add a constitution rule correctly after day-0, with `--fulfills=<id>` for a custom equivalent of a default rule.
+- The constitution's Author Attribution rule now also requires confirming `git config user.email`/`user.name` before a repository's first commit, instead of trusting whatever identity the global git default resolves to.
+
+### Fixed
+- `sdd-init`'s default `sdd.config.json` no longer claims "clean-architecture" for every new project; it says the style is not yet decided until the discovery interview records one.
+
 ## [1.4.0] - 2026-09-25
 
 Records written by 1.3.0 use the old format: run `sdd-verify --record` (and `sdd-verify --task`

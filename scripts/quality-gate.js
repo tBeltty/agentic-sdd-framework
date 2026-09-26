@@ -29,6 +29,7 @@ const CHECKS = [
     { title: '✍️  No-AI-Slop Copy Linter', module: require('./check-copy-slop') },
     { title: '📏 File Size Limit', module: require('./check-file-size') },
     { title: '📋 Specification Check', module: require('./check-spec') },
+    { title: '📜 Constitution Check', module: require('./check-constitution') },
     { title: '🏷️  Version Sync Check', module: require('./check-versions') }
 ];
 

@@ -18,6 +18,22 @@ Load a skill from `.agents/skills/<name>/SKILL.md` only when its trigger applies
 | `no-ai-slop` | Writing documentation, user-facing copy, or commit messages |
 | `ast-navigator` | Exploring code. Active adapter: `{{AST_ADAPTER}}` (`.agents/skills/ast-navigator/adapters/{{AST_ADAPTER}}.md`) |
 
+## Adding a Rule
+
+`.agents/AGENTS.md` is the only place a project rule lives. If the user asks to add one
+("always do X", "never do Y", "remember this constraint"), do not write it to memory, to
+CLAUDE.md, or to a temporary or unrelated doc -- none of those are read by every agent, or
+checked by the gate. Run:
+
+```
+{{ADD_RULE_COMMAND}} --title "<short title>" --rule "<the operating rule>" --why "<why this rule exists>"
+```
+
+It appends a correctly numbered, tagged rule block; it refuses empty fields and bracket
+placeholders. If the rule replaces one of the 8 defaults with an equivalent of your own,
+add `--fulfills=<id>` (see the tag above the rule you are replacing in `.agents/AGENTS.md`)
+so the constitution check still recognizes it as fulfilling that slot.
+
 ## Project Facts
 
 * Runtime: {{RUNTIME}}

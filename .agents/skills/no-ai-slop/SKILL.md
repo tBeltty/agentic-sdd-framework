@@ -40,6 +40,7 @@ Do not use decorative buzzwords that inflate importance without adding technical
 1. **Active Voice & Factual Density:** Explain what the code does, what parameters it receives, and what command validates it.
 2. **State Measurable Facts:** Replace "ultra-fast performance" with measured latency or memory consumption (for example: "< 30MB RAM, < 50ms startup").
 3. **No Unverifiable Claims:** If a metric has not been empirically benchmarked, do not state it as fact.
+4. **Changelog Entries, One Line Each:** One bullet per change, present tense, user-facing ("Fixed X.", "Added Y."). No mechanism internals, no multi-sentence rationale, no nested sub-bullets explaining how it works -- that belongs in code comments, tests, or the PR description, not in CHANGELOG.md. See this file's own `## [1.3.0]` and `## [1.4.0]` entries for the target density.
 
 ---
 
