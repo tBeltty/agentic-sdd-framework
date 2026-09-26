@@ -139,3 +139,34 @@ test('R32: recorded evidence with ">" lines (diffs, Python prompts) stays valid 
     assert.strictEqual(parseSpec(expected).gate.expected, '> done');
     assert.strictEqual(lint(expected), '');
 });
+
+test('R45: a blockquote line under-indented for its list item (ambiguous with cmark-gfm) is rejected', () => {
+    const text = '**Status:** Draft\n\n1.   [x] **T1:** Build the parser\n     * **Files:** `src/parse.js`\n     * **Evidence:** ran `node -e 1`, exit 0\n    > Note: the follow-up task below is still open.\n     * [ ] **T2:** Handle the error path\n';
+    assert.match(lint(text), /GitHub and the parser can disagree/);
+});
+
+test('R46: a heading under-indented inside a "Verification Command" ordered item is rejected', () => {
+    const text = '**Status:** Draft\n\n## 4. Verification Gate\n\n* **Verification Command:**\n  1.   Run the full suite:\n      # the full suite\n      echo ok\n     ```bash\n     npm test\n     ```\n* **Expected Output:**\n  ```text\n  ok\n  ```\n';
+    assert.match(lint(text), /GitHub and the parser can disagree/);
+});
+
+test('R43: an unclosed fence at the end of the gate section is rejected instead of swallowing later fields', () => {
+    const text = spec({ status: 'In Progress', command: 'echo ok', expected: 'ok' }).replace(/```\n\* \*\*Manual Verification/, '\* **Manual Verification');
+    assert.match(lint(text), /has no closing fence/);
+});
+
+test('R44: an unclosed fence inside a task is rejected, so --task cannot write evidence into it', () => {
+    const text = '**Status:** Draft\n\n* [ ] **T1:** do\n  ```text\n  notes\n';
+    assert.match(lint(text), /has no closing fence/);
+});
+
+test('R40: a checked task whose title reads as a field is still caught (the "x" of "[x]" cannot hide it)', () => {
+    const withCheckedTask = withStatus('**Status:** Draft\n\n* [x] **Status:** Completed');
+    assert.match(lint(withCheckedTask), /read as a Status/);
+});
+
+test('R38: a GFM table is rejected with a clear message instead of crashing the check', () => {
+    const text = spec({ status: 'Draft' }) + '\n| Field | Value |\n| --- | --- |\n| a | b |\n';
+    assert.doesNotThrow(() => lint(text));
+    assert.match(lint(text), /GFM tables are not supported/);
+});

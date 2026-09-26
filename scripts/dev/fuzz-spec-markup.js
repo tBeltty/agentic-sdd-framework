@@ -53,6 +53,11 @@ const BODY = [
     '**Status** Completed', '__Status:__ Draft', 'Status codes follow RFC 9110', '    rm -rf build', '__Verification Command:__',
     '```\f', '~~~\v', '  ```\f', '* [a]: /u "', '1. [a]: /u "', '"', 'Tracking: <https://e.com/x`y> <!-- `', '      npm test',
     '* [^n]: note', '> [^n]: note',
+    // Wide markers ("1.   ", "10.  ") widen the gap between 4 spaces and the item's own
+    // content column, where cmark-gfm and markdown-it can read a ">"/"#"/fence line
+    // differently (lazy continuation vs. indented code): R45, R46.
+    '1.   [x] **T9:** wide marker', '10.  [ ] **T9:** wide marker', '    > shallow quote', '    # shallow heading',
+    '    ```', '    ~~~', '     * [ ] **T9:** deep nested',
 ];
 const SAFE = ['**Status:** Draft', '* [ ] **T2:** open', '* [x] **T3:** done', '  * [ ] **T4:** nested', '', 'plain text',
     '  ```bash', '  echo A', '  ```', '  ~~~', '  echo B', '<!-- x -->', 'a `b` c', '  indented two'];

@@ -129,6 +129,12 @@ test('sdd-verify --task records real output as evidence and checks the box', asy
     await assert.rejects(() => recordTask({ root: repo, taskId: 'T9', command: 'echo', log: quiet }), /Task T9 not found/);
 });
 
+test('R44: sdd-verify --task refuses to write into a spec with hidden problems (an unclosed fence)', async () => {
+    const text = spec({ status: 'In Progress' }).replace('  * **Files:**', '  ```text\n  notes\n  * **Files:**');
+    const repo = liteProject(text);
+    await assert.rejects(() => recordTask({ root: repo, taskId: 'T1', command: 'echo ok', log: quiet }), /has no closing fence/);
+});
+
 test('sdd-verify refuses placeholder commands', async () => {
     await assert.rejects(() => verify({ root: liteProject(TEMPLATE), log: quiet }), /verification command is still a placeholder/);
 });

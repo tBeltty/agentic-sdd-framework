@@ -97,6 +97,9 @@ function secretAssignment(rawLine, { configFile }) {
     else return null;
     if (value.length < 8 || isPlaceholder(value) || isReference(value)) return null;
     if (/\s/.test(value)) return null; // prose, not a credential
+    // Lockfile dependency specifiers (pnpm/yarn) put peer-dependency ranges in parens, e.g.
+    // "0.4.8(@solana/web3.js@1.95.3(...))"; no credential format uses parens.
+    if (/[()]/.test(value)) return null;
     // Passwords can be low-entropy words; tokens and keys must look random.
     if (!PASSWORD_KEY_RE.test(key) && (value.length < 16 || entropy(value) < 3.0)) return null;
     return { key, value };

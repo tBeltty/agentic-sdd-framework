@@ -117,6 +117,29 @@ test('N15: recorded evidence containing backtick fences round-trips intact', () 
     assert.match(lint(recorded.replace('console.log(1)', 'console.log(2)')).join(), /edited after sdd-verify wrote it/);
 });
 
+test('R41: sdd-verify --task checks the box and places evidence at the inner column of a nested marker', () => {
+    for (const [line, evidenceMarker] of [
+        ['* * [ ] **T1:** Build the parser', '    *'],
+        ['1. - [ ] **T1:** Build the parser', '     *']
+    ]) {
+        const text = `**Status:** Draft\n\n${line}\n`;
+        const out = withTaskEvidence(text, 'T1', { date: '2026-09-25', exit: '0', transcript: 'done' });
+        const task = parseSpec(out).tasks.find(t => t.id === 'T1');
+        assert.strictEqual(task.checked, true, line);
+        assert.strictEqual(task.evidence.recorded.intact, true, line);
+        assert.ok(out.split('\n').some(l => l.startsWith(evidenceMarker) && l.includes('**Evidence:**')), `evidence at the inner column: ${line}`);
+    }
+});
+
+test('R42: sdd-verify --task does not delete a task nested under the previous Evidence', () => {
+    const text = '**Status:** Draft\n\n* [ ] **T1:** do\n  * **Evidence:** old text\n    * [ ] **T2:** other\n';
+    const out = withTaskEvidence(text, 'T1', { date: '2026-09-25', exit: '0', transcript: 'done' });
+    const parsed = parseSpec(out);
+    assert.deepStrictEqual(parsed.tasks.map(t => t.id), ['T1', 'T2']);
+    assert.strictEqual(parsed.tasks[0].checked, true);
+    assert.strictEqual(parsed.tasks[1].checked, false);
+});
+
 test('completed requires every task checked, and a PASS matching the expected state', () => {
     const state = '0123456789abcdef';
     const done = completedWith({ state });
@@ -158,7 +181,8 @@ test('F75: auditkit version comparison', () => {
     assert.deepStrictEqual(parseVersion('auditkit 0.3.0\n'), [0, 3, 0]);
     assert.strictEqual(versionAtLeast([0, 2, 9], MIN_AUDITKIT), false);
     assert.strictEqual(versionAtLeast([0, 3, 7], MIN_AUDITKIT), false);
-    assert.strictEqual(versionAtLeast([0, 3, 8], MIN_AUDITKIT), true);
+    assert.strictEqual(versionAtLeast([0, 3, 8], MIN_AUDITKIT), false);
+    assert.strictEqual(versionAtLeast([0, 3, 9], MIN_AUDITKIT), true);
     assert.strictEqual(versionAtLeast([1, 0, 0], MIN_AUDITKIT), true);
 });
 
@@ -201,7 +225,7 @@ test('F75: rigor mode rejects an auditkit older than the minimum', { skip: proce
     fs.writeFileSync(stub, '#!/bin/sh\necho "auditkit 0.3.7"\n', { mode: 0o755 });
     const result = withAuditkit(stub, () => checkSpec({ root: rigorProject() }));
     assert.strictEqual(result.ok, false);
-    assert.match(result.report, /older than 0\.3\.8/);
+    assert.match(result.report, /older than 0\.3\.9/);
 });
 
 test('rigor mode passes fresh templates and rejects DONE without evidence', { skip: !hasAuditkit && 'auditkit not installed' }, () => {

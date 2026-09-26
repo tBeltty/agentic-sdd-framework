@@ -15,6 +15,9 @@
  *     colon, or the name emphasized, at the start of a line, compared after folding case,
  *     punctuation, and look-alike letters) is an error, as is text that reads as a task
  *     checkbox without being one.
+ *   - a line right after a list item, indented 4 or more spaces but fewer than that item's
+ *     own content column, and starting with ">", "#", or a fence: markdown-it and cmark-gfm
+ *     can disagree on whether it continues the item's last paragraph or opens indented code.
  * Code (fenced or indented) is verbatim and never checked against these rules.
  */
 
@@ -53,6 +56,7 @@ const CHECKBOX_RE = /^\[([ xX])\](?=[ \t]|$)/;
 // A footnote definition at the start of a line, after any blockquote or list markers.
 const FOOTNOTE_RE = /^(?:[ \t]*(?:>|[*+-]|\d{1,9}[.)])?)*[ \t]*\[\^[^\]]*\]:/;
 const RAW_HTML = 'raw HTML (HTML comments included) is not supported in the specification: it can hide or change what renders. Use Markdown, or put it in a code span.';
+const TABLE_NOT_SUPPORTED = 'GFM tables are not supported in the specification. Use a list instead.';
 
 // Nests the flat token stream: every *_open token becomes a node holding its children.
 function tokenTree(tokens) {
@@ -112,9 +116,11 @@ function renderedLines(inline) {
     return lines;
 }
 
-// The field a rendered line reads as, if any.
+// The field a rendered line reads as, if any. A checkbox literal ("[x] ", "[ ] ") at the
+// start is stripped first: its letter (the "x" of a checked box) would otherwise land in
+// the skeleton and hide a task whose title reads as a field, such as "[x] **Status:** ...".
 function fieldOf({ text, emphasis }) {
-    const shape = skeleton(text);
+    const shape = skeleton(text.replace(/^\[[ xX]\]\s*/, ''));
     return FIELDS.find(f => shape.startsWith(`${f.key}:`) || (emphasis !== null && skeleton(emphasis).startsWith(f.key))) || null;
 }
 
@@ -135,6 +141,57 @@ function trimRange([start, end], lines) {
     let stop = end;
     while (stop > start + 1 && /^[ \t]*$/.test(lines[stop - 1] || '')) stop--;
     return [start, stop];
+}
+
+// The column where a list item's own content starts: past every list marker at the start of
+// its first line. Usually one marker, but a list can start nested on the same source line
+// ("* * ...", "1. - ..."), so every marker up to the content is consumed, not only the first.
+function contentColumn(line) {
+    let column = 0;
+    let rest = line;
+    let marker;
+    while ((marker = rest.match(LIST_ITEM_RE))) {
+        const consumed = marker[1].length + marker[2].length + (marker[3] ? marker[3].length : 1);
+        column += consumed;
+        rest = rest.slice(consumed);
+    }
+    return column;
+}
+
+// A line indented 4 or more spaces but fewer than the content column of the list item that
+// ends right before it, and that would start a blockquote, heading, or fenced code once its
+// indentation is read as one of those (rather than as part of the code that indentation would
+// otherwise open): cmark-gfm reads it as continuing that item's last paragraph (lazy
+// continuation); markdown-it reads it as indented code, ending the item there instead. Every
+// case the tenth review found this way hid a task or swapped the verification command, so it
+// is rejected rather than guessed at either way.
+const AMBIGUOUS_CONTINUATION_RE = /^(?:>|#|```|~~~)/;
+function checkAmbiguousContinuations(tree, lines, at) {
+    const flagged = new Set();
+    for (const node of walk(tree)) {
+        if (node.type !== 'list_item' || !node.token.map) continue;
+        const boundary = node.token.map[1];
+        if (boundary >= lines.length || flagged.has(boundary)) continue;
+        const line = lines[boundary];
+        const indent = (line.match(/^ */) || [''])[0].length;
+        const column = contentColumn(lines[node.token.map[0]]);
+        if (indent < 4 || indent >= column || !AMBIGUOUS_CONTINUATION_RE.test(line.slice(indent))) continue;
+        flagged.add(boundary);
+        at(boundary, `this line is indented ${indent} space(s): less than the ${column} the list item above needs for its own content, but 4 or more. GitHub and the parser can disagree on whether it continues that item or starts indented code. Indent it to column ${column} to keep it in the item, or under 4 spaces to end the item.`);
+    }
+}
+
+// The line of the first list item nested under `node` (at any depth) that is itself a
+// task, or null. A task nested under the Evidence item (indented to its content column) is
+// not part of the evidence: it must keep its own place when evidence is rewritten.
+function firstNestedTaskLine(node) {
+    for (const child of walk(node)) {
+        if (child.type !== 'inline') continue;
+        const paragraph = child.parent.type === 'paragraph' ? child.parent : null;
+        const li = paragraph && paragraph.parent.type === 'list_item' && paragraph.parent.children[0] === paragraph ? paragraph.parent : null;
+        if (li && li !== node && CHECKBOX_RE.test(child.token.content)) return li.token.map[0];
+    }
+    return null;
 }
 
 function readTask(item, inline, lines) {
@@ -158,20 +215,28 @@ function readTask(item, inline, lines) {
             return first && /^\*\*Evidence:\*\*/.test(first.token.content);
         });
         if (!evidence) continue;
+        // A task nested under Evidence (see firstNestedTaskLine) ends the evidence's own
+        // content: its text, code and range stop there, so rewriting evidence cannot delete it.
+        const nestedTaskLine = firstNestedTaskLine(evidence);
+        const ownEnd = nestedTaskLine !== null ? nestedTaskLine : evidence.token.map[1];
         const first = firstInline(evidence).token;
         const [head, ...more] = first.content.split('\n');
         const header = head.replace(/^\*\*Evidence:\*\*/, '').trim();
         const text = [header, ...more];
+        let code = null;
         for (const node of walk(evidence)) {
+            if (!node.token || !node.token.map || node.token.map[0] >= ownEnd) continue;
             if (node.type === 'inline' && node.token !== first) text.push(node.token.content);
-            if (node.type === 'fence' || node.type === 'code_block') text.push(codeText(node.token));
+            if (node.type === 'fence' || node.type === 'code_block') {
+                text.push(codeText(node.token));
+                if (code === null) code = node.token;
+            }
         }
-        const code = firstCode(evidence);
         task.evidence = {
             header,
             text: text.filter(t => t.trim() !== '').join('\n').trim(),
             code: code ? codeText(code) : null,
-            range: trimRange(evidence.token.map, lines)
+            range: trimRange([evidence.token.map[0], ownEnd], lines)
         };
         break;
     }
@@ -206,6 +271,12 @@ function readDocument(lines) {
         const indent = lines[first].match(/^[ >]*/)[0].length;
         if (/^[ >]*\t/.test(lines[first]) || /^[ >]*\t/.test(lines[end - 1] || '')) at(first, tabbed);
         for (let i = first + 1; i < end - 1; i++) if (lines[i].slice(0, indent).includes('\t')) at(i, tabbed);
+        // An unclosed fence runs to the end of its container (CommonMark, not an error there),
+        // but the template requires closed fences: later lines (a field, a task) would silently
+        // become its content instead of rendering as themselves.
+        const ch = node.token.markup[0];
+        const closeRe = new RegExp(`^[ >]*${ch === '`' ? '`' : '~'}{${node.token.markup.length},}[ \\t]*$`);
+        if (!closeRe.test(lines[end - 1] || '')) at(first, 'this fenced code block has no closing fence: it runs to the end of its container, and later lines are read as its content. Close it with a matching fence.');
     }
     lines.forEach((line, i) => {
         if (code.has(i)) return;
@@ -219,13 +290,19 @@ function readDocument(lines) {
     if (references.length > 0) {
         problems.push(`Link reference definitions and footnotes are not supported (they render nothing and can hide lines): ${references.map(r => `[${r}]`).join(', ')}. Use inline links: [text](url).`);
     }
+    checkAmbiguousContinuations(tree, lines, at);
 
     const tasks = [];
     const fieldLines = [];
     for (const node of walk(tree)) {
         if (node.type === 'html_block') at(node.token.map[0], RAW_HTML);
+        // Table cells have no source map (their content can span or be split across the
+        // row's source line), so they cannot be tied to a line: reject tables instead of
+        // guessing at one.
+        if (node.type === 'table') at(node.token.map[0], TABLE_NOT_SUPPORTED);
         if (node.type !== 'inline') continue;
         const inline = node.token;
+        if (!inline.map) continue;
         const start = inline.map[0];
         for (const child of inline.children || []) {
             if (child.type === 'html_inline') at(start, RAW_HTML);
@@ -238,7 +315,10 @@ function readDocument(lines) {
         renderedLines(inline).forEach((rendered, k) => {
             const field = fieldOf(rendered);
             if (field) fieldLines.push({ field, node, item: k === 0 ? item : null, line: start + k, source: (sourceLines[k] || '').trimEnd(), rendered });
-            if (!(isTask && k === 0) && /^\s*\[[ xX]\]/.test(rendered.text)) {
+            // A list marker can precede the checkbox here too ("* [ ] ..."), not just the
+            // checkbox alone: an over-indented line following a blockquote or list item can
+            // render as continuation text that still reads as a whole task, marker included.
+            if (!(isTask && k === 0) && /^\s*(?:[*+-]|\d{1,9}[.)])?\s*\[[ xX]\]/.test(rendered.text)) {
                 at(start + k, 'this reads as a task checkbox but is not the first line of a list item ("* [ ] **T1:** ..."), so it is not a task. Fix the list marker or remove the brackets.');
             }
         });

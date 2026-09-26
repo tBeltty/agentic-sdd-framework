@@ -183,16 +183,30 @@ function formatRecordedEvidence({ date, exit, transcript, indent }) {
     ];
 }
 
+// The column where a task's own content ("[ ] **T1:** ...") starts: past every list marker
+// at the start of its line. Usually one marker ("* " is 2, "1. " is 3, "10. " is 4), but a
+// list item can nest its whole list on one source line ("* * [ ]", "1. - [ ]"), so every
+// marker up to the checkbox is consumed, not only the first.
+function taskContentColumn(line) {
+    let column = 0;
+    let rest = line;
+    let marker;
+    while ((marker = rest.match(LIST_ITEM_RE))) {
+        const consumed = marker[1].length + marker[2].length + (marker[3] ? marker[3].length : 1);
+        column += consumed;
+        rest = rest.slice(consumed);
+    }
+    return column;
+}
+
 // Replaces (or adds) the Evidence field of a task and checks its box.
 function withTaskEvidence(rawText, taskId, evidence) {
     const lines = normalizeEol(rawText).split('\n');
     const task = parseSpec(rawText).tasks.find(t => t.id === taskId);
     if (!task) throw new Error(`Task ${taskId} not found in the specification.`);
     if (task.quoted) throw new Error(`Task ${taskId} is inside a blockquote; move it out before recording evidence.`);
-    // Evidence goes at the item's content column ("* " is 2, "1. " is 3, "10. " is 4), so
-    // it renders inside the list item.
-    const item = lines[task.line].match(LIST_ITEM_RE);
-    const indent = item[1].length + item[2].length + (item[3] ? item[3].length : 1);
+    // Evidence goes at the item's own content column, so it renders inside the list item.
+    const indent = taskContentColumn(lines[task.line]);
     const block = formatRecordedEvidence({ ...evidence, indent });
     if (task.evidence.range) {
         const [start, end] = task.evidence.range;
@@ -202,7 +216,7 @@ function withTaskEvidence(rawText, taskId, evidence) {
     } else {
         lines.splice(task.blockEnd, 0, ...block);
     }
-    lines[task.line] = lines[task.line].replace(/^( *(?:[*+-]|\d{1,9}[.)]) +)\[ \]/, '$1[x]');
+    lines[task.line] = lines[task.line].slice(0, indent) + lines[task.line].slice(indent).replace(/^\[ \]/, '[x]');
     return withEol(rawText, lines);
 }
 

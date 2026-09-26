@@ -23,7 +23,10 @@ for recorded evidence) again before pushing a `Completed` spec.
 - `sdd-init` reuses the answers stored in an existing `sdd.config.json` as defaults; only explicit
   flags override them. The spec and Rigor documents are created at the configured
   `specification.specFile` and `specification.roadmapDir`.
-- Rigor mode requires `auditkit` 0.3.8 or newer. CI pins the protocol repository to v0.3.8.
+- Rigor mode requires `auditkit` 0.3.9 or newer (0.3.9 rejects hypothetical, waived, or
+  action-negated negative controls that still name an action and a failure, and recognizes
+  `add`, `insert`, `introduce`, and `stash` as control actions). CI pins the protocol
+  repository to v0.3.9.
 - Check scripts reject unknown flags (a typo checked the working tree instead) and accept
   `--ref <commit>` as well as `--ref=<commit>`.
 - Config paths must be canonical (`docs/SPEC.md`, not `./docs/SPEC.md`), and `specFile` and
@@ -56,8 +59,25 @@ for recorded evidence) again before pushing a `Completed` spec.
   and the fields written exactly as in the template. `scripts/dev/fuzz-spec-markup.js` compares
   the gate's reading with cmark-gfm (GitHub's renderer): no bypass in 300,000 random specs,
   where the previous parser had several.
+- A tenth review of the CommonMark rewrite found markdown-it itself disagreeing with cmark-gfm
+  on a narrow class of cases: a line right after a list item, indented 4 or more spaces but
+  fewer than that item's own content column, and starting with `>`, `#`, or a fence. cmark-gfm
+  reads it as continuing the item's last paragraph; markdown-it reads it as indented code,
+  ending the item there and hiding an unchecked task or swapping the verification command.
+  This is now rejected instead of read either way. It also found: a GFM table crashed the spec
+  check instead of being rejected; a checked task whose title read as `**Status:**` escaped
+  detection because the checkbox's own "x" hid it from the field check; a checkbox preceded by
+  a list marker on an over-indented continuation line was not recognized as a hidden task; an
+  unclosed fence was accepted even though the template requires closed fences, letting `Last
+  Verified` or task evidence be written inside it; `sdd-verify --task` misplaced evidence when
+  the task's marker was nested on the same source line (`* * [ ]`, `1. - [ ]`), and deleted a
+  task nested under the previous `**Evidence:**` item without warning; and `sdd-verify --task`
+  had no check for a spec with hidden problems before writing evidence, unlike `--record`.
 - `sdd-verify --task` wrote evidence at 2 spaces under numbered tasks, which rendered outside
   the list item; evidence now goes at the item's content column.
+- The secret scanner flagged pnpm/yarn lockfile dependency specifiers ending in `token` (a
+  scoped package name such as `@solana/spl-token`) as a secret assignment; a value containing
+  the parens a peer-dependency range uses is no longer treated as a credential.
 - The secret scanner skipped any file named `verify-no-secrets.js`, any lockfile, and any path
   containing `node_modules/`; it now skips only its own installed paths and `node_modules/` path
   segments, as documented in the README. Lockfiles are scanned: a private-registry URL can embed

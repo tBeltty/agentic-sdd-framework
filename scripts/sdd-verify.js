@@ -110,7 +110,9 @@ async function verify({ root = repoRoot(), record = false, log = console.log, da
 
 async function recordTask({ root = repoRoot(), taskId, command, log = console.log, date } = {}) {
     const { specFile, specPath, text, runOptions } = loadLiteSpec(root);
-    if (!parseSpec(text).tasks.some(t => t.id === taskId)) {
+    const spec = parseSpec(text);
+    if (spec.hiddenProblems.length > 0) throw new Error(`${specFile}: ${spec.hiddenProblems.join(' ')}`);
+    if (!spec.tasks.some(t => t.id === taskId)) {
         throw new Error(`Task ${taskId} not found in ${specFile}.`);
     }
     log(`$ ${command}\n`);

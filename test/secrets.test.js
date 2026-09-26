@@ -280,3 +280,8 @@ test('R37: a token embedded in a lockfile registry URL is caught', () => {
     git(repo, 'add', '-A');
     assert.match(run({ root: repo }).report, /package-lock\.json/);
 });
+
+test('R39: a pnpm-lock.yaml peer-dependency spec ending in "token" is not a secret assignment', () => {
+    const line = "  '@solana/spl-token': 0.4.8(@solana/web3.js@1.95.3(bufferutil@4.0.8)(utf-8-validate@5.0.10))(typescript@5.5.4)";
+    assert.deepStrictEqual(found(line, 'pnpm-lock.yaml'), []);
+});
