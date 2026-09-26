@@ -22,9 +22,9 @@ This document establishes the non-negotiable operating rules for AI coding agent
 
 <!-- sdd:rule id="mandatory-verification" tier="critical" -->
 ## 3. Mandatory Verification Before Certification
-* **Rule:** A task or phase is not complete until its explicit verification command exits with code 0. Reading code visually is never a substitute for running the code.
+* **Rule:** A task or phase is not complete until its explicit verification command exits with code 0. Reading code visually is never a substitute for running the code. When the change touches anything a user perceives directly -- rendered markup, CSS, a screen transition, an interactive flow -- a green test suite is not sufficient evidence: verify by actually driving the interface the way a user would, since a unit test does not render CSS or exercise the DOM's `hidden`/cascade behavior. Any claim of having stopped, cleaned up, or removed a process or resource must name the exact identifier (PID, handle, container id) the agent itself created; never certify a resource as handled without confirming it is the one you spawned.
 * **Why this rule exists:**
-  > Clean-looking code is not proof of working code. A visual review cannot catch a broken runtime path, a failing integration, or a regression an agent introduced while editing; running the actual command is the only evidence this framework accepts, which is why `sdd-verify` exists.
+  > Clean-looking code is not proof of working code. A visual review cannot catch a broken runtime path, a failing integration, or a regression an agent introduced while editing; running the actual command is the only evidence this framework accepts, which is why `sdd-verify` exists. A full test suite has passed while a CSS rule silently defeated the `hidden` attribute and left two screens stacked on top of each other, invisible to any test that never renders a page -- the tests were evidence of the backend logic, not of what a user would actually see. The same gap extends to claims about system actions: an agent reported having stopped "its own" test process while actually terminating a different, pre-existing one, misidentifying the PID in its own success report. Certifying either kind of claim requires evidence tied to the specific thing claimed, not prose that merely sounds like evidence.
 
 ---
 

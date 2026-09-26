@@ -61,6 +61,16 @@ anyone who can run `sdd-verify` can also write a matching record; there is no ke
 For an authoritative result, have CI run `sdd-verify` again. Recorded evidence also cannot prove
 a verification command is meaningful; that remains the reviewer's call.
 
+**The framework does not guarantee bug-free code, and does not claim to.** It guarantees that
+a checked-off task has a command that actually ran, exited the code it says it did, against
+the file state it says it did. It does not guarantee that command was the right one to catch
+the bug that matters: a backend unit suite passing has, in practice, certified a UI as working
+while a CSS rule silently defeated the `hidden` attribute and stacked two screens on top of
+each other, invisible to any test that never renders a page. Writing a verification command
+that actually exercises the failure mode in play (a live render, not just an exit code, for
+anything a user perceives directly) is still the task author's judgment call -- the gate
+enforces that a command ran and its evidence is intact, not that the command was sufficient.
+
 ## Execution environment
 
 Commands run in `specification.verifyShell` (default `/bin/sh` on macOS and Linux, `cmd.exe` on

@@ -15,6 +15,7 @@ Load a skill from `.agents/skills/<name>/SKILL.md` only when its trigger applies
 | :--- | :--- |
 | `strategic-cto` | Choosing a stack or architecture, or answering "can this be improved?" |
 | `auditor-executor-protocol` | Work spans several phases or sessions, or another agent implements the plan |
+| `fix-and-verify` | Fixing a reported bug, including a vague one with no repro steps, in a single session |
 | `no-ai-slop` | Writing documentation, user-facing copy, or commit messages |
 | `ast-navigator` | Exploring code. Active adapter: `{{AST_ADAPTER}}` (`.agents/skills/ast-navigator/adapters/{{AST_ADAPTER}}.md`) |
 
