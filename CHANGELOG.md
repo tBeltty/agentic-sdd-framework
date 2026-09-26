@@ -32,33 +32,13 @@ for recorded evidence) again before pushing a `Completed` spec.
 - CI uses `actions/checkout@v7` and `actions/setup-node@v7`, which run on Node.js 24.
 
 ### Fixed
-- Files were read by path through `git show`/`cat-file`, so a name containing a newline, or a
-  staged file named like `0:path`, was read wrongly or skipped. Blobs are now read by object id and
-  every `cat-file` header is validated.
-- A secret introduced only by a merge commit, or in a file that replaced a symlink, was not
-  scanned in push mode or with `--staged`.
-- Reading more than 256 MB of tracked content from a commit or the index failed with ENOBUFS;
-  blobs are now read in bounded batches.
-- With `core.autocrlf` (the Windows default), a committed spec checked out with CRLF line endings
-  was treated as uncommitted, so a later commit that did not touch the spec reopened it. The spec
-  is now compared by Git object id with Git's line-ending filters applied.
-- In a shallow clone, a Completed spec failed with a misleading state mismatch. A depth-1 clone
-  whose newest commit completed the spec now passes; otherwise the failure explains that the full
-  history is needed.
-- The spec parser read some Markdown differently from GitHub, which could hide an unchecked
-  task, swap the Status, or make `sdd-verify` run a command other than the rendered one (nine
-  review rounds found cases: comments, fences left open or opened on a list marker, tabs,
-  escaped backticks, link titles and definitions, footnotes, entities, invisible and look-alike
-  characters, indented code before the command). The spec is now parsed with a CommonMark
-  parser (markdown-it 14.3.2, vendored under `scripts/lib/vendor/`, MIT; no npm dependency), and
-  tasks, the Status, evidence, and the command are read from the parsed structure. A small
-  subset keeps GitHub's renderer and the parser in agreement: no raw HTML or comments, no link
-  definitions or footnotes, no entities or invisible characters, no tabs deciding indentation,
-  and the fields written exactly as in the template. `scripts/dev/fuzz-spec-markup.js` compares
-  the gate's reading with cmark-gfm (GitHub's renderer): no bypass in 300,000 random specs,
-  where the previous parser had several.
-- Fixed a rare case where the spec parser could read a list item differently than GitHub does,
-  which could hide a task or change the recorded verification command.
+- Fixed how some tracked files (unusual names, very large content) were read for the secret scan.
+- Fixed secrets not being scanned in some commits.
+- Fixed a false positive on committed specs with CRLF line endings.
+- Fixed a misleading failure in shallow clones.
+- Fixed the spec parser disagreeing with GitHub on some Markdown, which could hide a task,
+  change the Status, or run a different verification command.
+- Fixed a rare case where the spec parser could read a list item differently than GitHub does.
 - Fixed a crash when the spec contains a table.
 - Fixed a checked task that could be misread and skip validation.
 - Fixed a hidden task not being detected in some cases.
@@ -66,65 +46,29 @@ for recorded evidence) again before pushing a `Completed` spec.
 - Fixed `sdd-verify --task` misplacing evidence in some cases.
 - Fixed `sdd-verify --task` silently deleting other task data in some cases.
 - Fixed `sdd-verify --task` not checking for existing spec problems before writing evidence.
-- `sdd-verify --task` wrote evidence at 2 spaces under numbered tasks, which rendered outside
-  the list item; evidence now goes at the item's content column.
-- Fixed a false positive in the secret scanner for some lockfile entries.
-- The secret scanner skipped any file named `verify-no-secrets.js`, any lockfile, and any path
-  containing `node_modules/`; it now skips only its own installed paths and `node_modules/` path
-  segments, as documented in the README. Lockfiles are scanned: a private-registry URL can embed
-  a token.
-- Where symlinks are unavailable, the skill copies in `.claude/skills/` failed a fresh project's
-  prose check; they are excluded like the `.agents/skills/` originals.
-- Plain-text values in Windows batch files (`set API_TOKEN=...`, `setx NAME value`) were not
-  scanned as literals, and Go/Pascal `:=` assignments were never scanned.
-- `scripts/dev/sync-vendored.js` treated a mistyped flag as a write; unknown flags are errors.
-- The secret scanner reported expressions assigned to secret-named keys (`password = getPassword()`)
-  and missed unquoted values in config, rc, shell, and Docker files and keys such as `SECRET_KEY`; one placeholder on a line hid a real key later on the
-  same line; a NUL byte or UTF-16 encoding hid a file from the scan.
-- The specification parser read `Status` lines and tasks inside code fences and HTML comments,
-  accepted several `Status` lines, and ignored tasks inside blockquotes. A `<!--` inside inline
-  code hid every task up to the next `-->`, and a verification command inside an HTML comment
-  was run and recorded instead of the visible one. Only a line starting with `<!--` opens a
-  comment now, the gate is read from rendered lines, and a comment that holds tasks, Status, gate
-  fields, or code fences fails the check. Evidence containing
-  backtick fences could end the recorded block early.
-- On timeout, `sdd-verify` killed only the shell; background processes started by the command kept
-  running. The whole process tree is now killed, and output is decoded as a UTF-8 stream.
-- The framework exemption in the specification check applied to any project with
-  `project.type: framework`; it now also requires the framework's package name.
-- The config validator accepted inherited object keys such as `toString`, and empty path strings.
-- The prose linter skipped all of `docs/roadmap/` even when `roadmapDir` pointed elsewhere; it now
-  skips the configured `roadmapDir` and the vendored templates.
-- `sdd-init` next steps named the default spec paths instead of the configured ones, and guided
-  mode crashed on a target directory that did not exist; it now offers to create it.
-- Test temporary directories are removed on exit; the hook tests run on Windows through `sh`.
+- Fixed where `sdd-verify --task` wrote evidence under numbered tasks.
+- Fixed several false positives and false negatives in the secret scanner.
+- Fixed which paths the secret scanner skips.
+- Fixed a prose-check false positive where symlinks are unavailable.
+- Fixed `scripts/dev/sync-vendored.js` accepting a mistyped flag.
+- Fixed `sdd-verify` not killing background processes on timeout.
+- Fixed the framework exemption in the specification check applying too broadly.
+- Fixed the config validator accepting invalid keys.
+- Fixed the prose linter's handling of a custom `roadmapDir`.
+- Fixed `sdd-init`'s next steps and guided mode in some configurations.
+- Fixed test cleanup and Windows hook tests.
 
 ## [1.3.0] - 2026-09-25
 
 ### Fixed
-- The pre-push hook checked the working tree instead of the pushed commits, so a committed secret
-  removed only from the working tree was pushed. The hook now passes the push to
-  `quality-gate.js --push`, which checks each pushed commit and scans every new commit for secrets.
-- Git failures were swallowed: outside a repository, or when Git errored, every check reported
-  "0 files" and passed. Checks now fail with the Git error.
-- `sdd.config.json` was not validated: a typo or wrong type silently disabled a check (for example
-  `"exclude": "docs/"` switched the prose linter off). The file is validated against
-  `scripts/lib/sdd.config.schema.json` on every run; custom keys use an `x-` prefix. A UTF-8 BOM is
-  accepted.
-- Specification check bypasses: CRLF line endings hid every task; an unknown status such as "Done"
-  disabled the rules; checkbox tasks without a bold `**ID:**` were ignored; any `Last Verified`
-  containing "PASS" was accepted; and a PASS stayed valid after the verified files changed.
-- The secret scanner missed PGP private keys, credentials in URLs, secret-named assignments
-  (`password`, `client_secret`, `access_token`, ...), and tracked secret files (`.env`, `id_rsa`,
-  `*.key`, `*.p12`). Pragma suppressions are now counted in the report.
-- `maxEmDashes` counted lines instead of dashes; fences closed on any fence marker.
-- The pre-push hook installer wrote into a `core.hooksPath` directory shared by other repositories;
-  it now leaves hook managers alone and prints the command to add. The hook falls back to the
-  absolute Node.js path when `node` is not on PATH, and the relative gate path is computed between
-  real (symlink-resolved) paths.
-- `sdd-init` ignored `--target <dir>` (space form) and unknown or misspelled flags; both are
-  handled now, and `--help` prints usage. When an existing `AGENTS.md` or `CLAUDE.md` is left
-  untouched, the next steps say so instead of claiming the rules load automatically.
+- Fixed the pre-push hook checking the working tree instead of the pushed commits.
+- Fixed Git failures being swallowed instead of failing the check.
+- Fixed `sdd.config.json` not being validated.
+- Fixed several bypasses in the specification check.
+- Fixed the secret scanner missing several kinds of credentials and secret files.
+- Fixed `maxEmDashes` and the fence-closing rule.
+- Fixed the pre-push hook installer writing into a shared hooks directory.
+- Fixed `sdd-init` ignoring some flags and forms.
 - `.claude/skills/` copies (used where symlinks are unavailable) were never refreshed; `--force`
   refreshes them.
 - `--staged` was inconsistent: the Rigor check and the version check read the working tree.
