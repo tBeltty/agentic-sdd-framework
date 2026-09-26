@@ -15,7 +15,7 @@ function detectEol(text) {
 
 // Tracks fenced code blocks. A fence closes only with the same character repeated at
 // least as many times as the opening fence, and nothing else on the line (CommonMark).
-// Any indentation is accepted because fences nested in list items are indented.
+// Any number of spaces is accepted because fences nested in list items are indented.
 function createFenceTracker() {
     let open = null;
     return {
@@ -24,7 +24,9 @@ function createFenceTracker() {
         },
         // Returns true when the line is a fence delimiter (opening or closing).
         update(line) {
-            const match = line.match(/^\s*(`{3,}|~{3,})(.*)$/);
+            // Only spaces may precede a fence (CommonMark); a tab or other whitespace makes
+            // it something else, which the spec parser reports separately.
+            const match = line.match(/^ *(`{3,}|~{3,})(.*)$/);
             if (!match) return false;
             const [, marker, rest] = match;
             if (open === null) {

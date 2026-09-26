@@ -96,3 +96,43 @@ test('R28: a fence on a list-marker line is rejected, so it cannot hide tasks or
     // Outside the subset nothing is guessed: the spec fails, and sdd-verify refuses to run it.
     assert.ok(parseSpec(swapped).hiddenProblems.length > 0);
 });
+
+test('R29: a gate label inside a link definition title is not the label', () => {
+    const text = spec({ status: 'In Progress', command: 'npm test', expected: 'ok' }).replace('* **Verification Command:**\n',
+        '[ci]: https://example.com/ci "**Verification Command:**"\n\nRun it.\n\n```bash\necho ok\n```\n\n* **Verification Command:**\n');
+    assert.strictEqual(parseSpec(text).gate.command, 'npm test');
+    assert.match(lint(text), /link reference definition holds spec structure/);
+});
+
+test('R30: a Status hidden in a link title or disguised with entities, invisible or look-alike characters is an error', () => {
+    const base = TEMPLATE.replace('**Status:** Draft | In Progress | Completed', '__STATUS__');
+    const cases = [
+        '[notes](https://example.com "internal\n**Status:** Draft\nend")\n**Sta&#116;us:** Completed',
+        '**Status:** Draft\n\n**Sta\u200Btus:** Completed',
+        '**Status:** Draft\n\n**\u0405tatus:** Completed',
+        '**Status:** Draft\n\n**Status\uFF1A** Completed'
+    ];
+    for (const status of cases) {
+        assert.notStrictEqual(lint(base.replace('__STATUS__', status)), '', JSON.stringify(status));
+    }
+    assert.match(lint(base.replace('__STATUS__', cases[0])), /inline link or image is not closed on this line/);
+    assert.match(lint(base.replace('__STATUS__', cases[1])), /invisible character/);
+    assert.match(lint(base.replace('__STATUS__', cases[2])), /write the Status line exactly/);
+});
+
+test('R31: fence content is verbatim; a quoted or NBSP line that ends the list item cannot hide a task', () => {
+    const withTask = recorded(spec({ status: 'Draft' }), 'T1', 'done');
+    const quotedTask = withTask.replace('* [ ] **T2:**', '  ```text\n  notes\n>   * [ ] **T9:** hidden\n  ```\n* [ ] **T2:**');
+    assert.match(lint(quotedTask), /indented less than its opening fence/);
+    const nbsp = withTask.replace('* [ ] **T2:**', '  ```text\n  notes\n\u00A0\n  * [ ] **T9:** hidden\n  ```\n* [ ] **T2:**');
+    assert.match(lint(nbsp), /indented less than its opening fence/);
+});
+
+test('R32: recorded evidence with ">" lines (diffs, Python prompts) stays valid and intact', () => {
+    const text = recorded(spec({ status: 'Draft' }), 'T1', '$ cat q.txt\n> quoted output line\n>>> python prompt\n  > indented quote');
+    assert.strictEqual(lint(text), '');
+    assert.strictEqual(parseSpec(text).tasks[0].evidence.recorded.intact, true);
+    const expected = spec({ status: 'In Progress', command: 'echo done', expected: '> done' });
+    assert.strictEqual(parseSpec(expected).gate.expected, '> done');
+    assert.strictEqual(lint(expected), '');
+});

@@ -24,7 +24,7 @@
 const crypto = require('crypto');
 const { normalizeEol, detectEol, createFenceTracker } = require('./markdown');
 const {
-    TASK_RE, LIST_ITEM_RE, indentOf, stripQuote, commentLines, uncommented, visibleLines, ambiguousMarkup
+    TASK_RE, LIST_ITEM_RE, FIELD_LIKE, indentOf, isBlank, stripQuote, commentLines, uncommented, unquoted, visibleLines, ambiguousMarkup
 } = require('./spec-markup');
 
 const STATUSES = ['draft', 'in progress', 'completed'];
@@ -111,7 +111,8 @@ function parseTasks(rawLines) {
     // Task detection runs on rendered content, with blockquote markers removed.
     const hidden = commentLines(rawLines);
     const lines = visibleLines(rawLines, hidden).map(stripQuote);
-    const unquoted = uncommented(rawLines, hidden).map(stripQuote);
+    // Evidence fences are read verbatim: blockquote markers are only removed outside fences.
+    const source = unquoted(rawLines, hidden);
     for (let i = 0; i < lines.length; i++) {
         const match = lines[i].match(TASK_RE);
         if (!match) continue;
@@ -128,13 +129,13 @@ function parseTasks(rawLines) {
         // The task block: following lines indented deeper than the checkbox (or blank).
         let end = i + 1;
         const inner = createFenceTracker();
-        while (end < unquoted.length) {
-            const line = unquoted[end];
+        while (end < source.length) {
+            const line = source[end];
             const delimiter = inner.update(line);
-            if (!delimiter && !inner.inside && line.trim() !== '' && indentOf(line) <= indent) break;
+            if (!delimiter && !inner.inside && !isBlank(line) && indentOf(line) <= indent) break;
             end++;
         }
-        while (end > i + 1 && unquoted[end - 1].trim() === '') end--;
+        while (end > i + 1 && isBlank(source[end - 1])) end--;
         // Fields inside the block; the Evidence field runs until the next field or the end.
         const fields = [];
         for (let j = i + 1; j < end; j++) {
@@ -145,7 +146,7 @@ function parseTasks(rawLines) {
         if (evidenceAt !== -1) {
             const next = fields[evidenceAt + 1];
             // Evidence content (fences included) is read from the unrendered lines.
-            task.evidence = parseEvidence(unquoted, fields[evidenceAt].index, next ? next.index : end);
+            task.evidence = parseEvidence(source, fields[evidenceAt].index, next ? next.index : end);
         }
         task.blockEnd = end;
         tasks.push(task);
@@ -175,9 +176,10 @@ function parseSpec(rawText) {
     let gate = null;
     if (bounds) {
         const [from, to] = bounds;
-        const labelAt = label => visible.findIndex((l, i) => i >= from && i < to && label.test(l));
-        const commandAt = labelAt(/\*\*Verification Command:\*\*/i);
-        const expectedAt = labelAt(/\*\*Expected Output:\*\*/i);
+        // Labels count only in their exact form at the start of a rendered line.
+        const labelAt = name => visible.findIndex((l, i) => i >= from && i < to && FIELD_LIKE.find(f => f.name === name).exact.test(l));
+        const commandAt = labelAt('Verification Command');
+        const expectedAt = labelAt('Expected Output');
         const command = commandAt === -1 ? null : firstFence(shown, commandAt + 1, to);
         const expected = expectedAt === -1 ? null : firstFence(shown, expectedAt + 1, to);
         const lastIndex = visible.findIndex((l, i) => i >= from && i < to && LAST_VERIFIED_RE.test(l));

@@ -45,7 +45,7 @@ const SECRET_PATTERNS = [
 // Keys whose value is a secret: ends in secret, token, password, pwd, credential(s), or an
 // api, private, access, secret, signing, encryption or master key. `max_tokens`,
 // `tokenizer` or `cache_key` do not match.
-const SECRET_KEY_RE = /(?:^|[^A-Za-z0-9_])([A-Za-z0-9_.-]*?(?:secret|token|passw(?:or)?d|pwd|credentials?|(?:api|private|access|secret|signing|encryption|master)[_-]?key))["']?\s*[:=]\s*(.*)$/i;
+const SECRET_KEY_RE = /(?:^|[^A-Za-z0-9_])([A-Za-z0-9_.-]*?(?:secret|token|passw(?:or)?d|pwd|credentials?|(?:api|private|access|secret|signing|encryption|master)[_-]?key))["']?\s*(?::=|[:=])\s*(.*)$/i;
 const PASSWORD_KEY_RE = /passw(?:or)?d|pwd|secret|credential/i;
 // Files where an unquoted value is a literal (KEY=value), not a code expression: env and
 // config files, package manager rc files, shell and batch scripts, and Dockerfiles. PowerShell

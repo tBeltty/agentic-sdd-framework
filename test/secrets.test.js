@@ -214,6 +214,8 @@ test('R4: secret-named keys ending in _key, and unquoted values in shell, rc and
         [`set API_TOKEN=${value}`, 'deploy.cmd'],
         ['set DB_PASSWORD=S3cretPassw0rd', 'setup.bat'],
         ['setx DB_PASSWORD Hunter2Secret99', 'deploy.bat'],
+        ['password := "hunter2' + 'hunter2"', 'main.go'],
+        [`apiKey := "${value}"`, 'main.go'],
         [`setx /M API_TOKEN ${value}`, 'deploy.cmd']
     ]) {
         assert.strictEqual(found(line, file)[0]?.patternName, 'Secret Assignment', `${file}: ${line}`);
@@ -226,6 +228,7 @@ test('R4: secret-named keys ending in _key, and unquoted values in shell, rc and
         ['$password = Read-Host "Enter password" -AsSecureString', 'deploy.ps1'],
         ['$credential = Get-Credential', 'deploy.ps1'],
         ['set /p DB_PASSWORD=Enter the database password:', 'setup.bat'],
+        ['password := os.Getenv("DB_PASSWORD")', 'main.go'],
         ['set API_TOKEN=%API_TOKEN%', 'deploy.cmd'],
         ['setx PATH "%PATH%;C:\\tools"', 'deploy.cmd'],
         ['$token = Get-AzAccessToken -ResourceUrl $url', 'deploy.ps1'],

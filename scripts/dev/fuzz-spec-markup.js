@@ -21,6 +21,7 @@ try {
     process.exit(2);
 }
 const { parseSpec } = require('../lib/spec');
+const { skeleton } = require('../lib/spec-markup');
 const md = new MarkdownIt({ html: true });
 const rnd = n => Math.floor(Math.random() * n);
 const BODY = [
@@ -29,6 +30,9 @@ const BODY = [
     '  indented two', '> quoted', '<!-- x -->', '<!--', '-->', '  <!--', 'a `b` c', '* ~~~', '1. ~~~', '* ```', '> ~~~',
     '* > ~~~', '  * ~~~', '- ~~~', '+ ```', '> * ~~~', '* [ ] ~~~', '  echo A', '  echo B', 'echo C', '    ```', '````',
     '* [x] **T6:** x\n  ~~~', '\t~~~', '* \t~~~', '1) ~~~',
+    '[n](https://e.com "t', 'end")', '[n](https://e.com "t")', '**Sta&#116;us:** Completed', '**Sta\u200Btus:** Completed',
+    '**\u0405tatus:** Completed', '\u00A0', '  \u00A0', '> x', '>   * [ ] **T7:** q', '  > * [ ] **T8:** q', '[d]: https://e.com',
+    '"title"', '[ci]: https://e.com "**Verification Command:**"', '**Status**: Completed', '**Status:**Completed', '&nbsp;',
 ];
 const SAFE = ['**Status:** Draft', '* [ ] **T2:** open', '* [x] **T3:** done', '  * [ ] **T4:** nested', '', 'plain text',
     '  ```bash', '  echo A', '  ```', '  ~~~', '  echo B', '<!-- x -->', 'a `b` c', '  indented two'];
@@ -37,7 +41,11 @@ function renderedView(text) {
     const html = md.render(text);
     const noCode = html.replace(/<pre>[\s\S]*?<\/pre>/g, '').replace(/<code>[\s\S]*?<\/code>/g, '');
     const tasks = [...noCode.matchAll(/<li>(?:\s*<p>)?\s*\[( |x|X)\]\s/g)].map(m => m[1] !== ' ');
-    const statuses = [...noCode.matchAll(/<strong>Status:<\/strong>\s*([^<\n]*)/g)].map(m => m[1].trim().toLowerCase());
+    // Every rendered block whose text reads like a Status line, however it is spelled.
+    const blocks = noCode.split(/<\/?(?:p|li|h[1-6]|blockquote|ul|ol)[^>]*>|<br\s*\/?>|\n/)
+        .map(b => b.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>'))
+        .map(skeleton).filter(b => b.startsWith('status'));
+    const statuses = blocks.map(b => b.slice(b.indexOf(':') + 1));
     let command = null;
     const at = html.indexOf('<strong>Verification Command:</strong>');
     if (at !== -1) {
@@ -60,10 +68,11 @@ for (let k = 0; k < N; k++) {
     const pUnchecked = spec.tasks.filter(t => !t.checked).length;
     const rUnchecked = r.tasks.filter(c => !c).length;
     const rStatus = r.statuses.length === 1 ? r.statuses[0] : null;
+    const pStatus = spec.status ? skeleton(spec.status) : null;
     const pCommand = spec.gate && spec.gate.command ? spec.gate.command.trim() : null;
     const problems = [];
     if (rUnchecked > pUnchecked) problems.push('hidden unchecked task');
-    if (rStatus !== null && rStatus !== spec.status) problems.push('status');
+    if (r.statuses.length > 1 || (rStatus !== null && rStatus !== pStatus)) problems.push(`status p=${pStatus} r=${r.statuses.join('|')}`);
     if (pCommand !== null && pCommand !== r.command) problems.push(`command p=${JSON.stringify(pCommand)} r=${JSON.stringify(r.command)}`);
     if (problems.length) {
         bad++;
