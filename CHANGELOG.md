@@ -57,25 +57,18 @@ for recorded evidence) again before pushing a `Completed` spec.
   and the fields written exactly as in the template. `scripts/dev/fuzz-spec-markup.js` compares
   the gate's reading with cmark-gfm (GitHub's renderer): no bypass in 300,000 random specs,
   where the previous parser had several.
-- A list item followed by an under-indented continuation line starting with `>`, `#`, or a
-  fence marker could be read differently than GitHub renders it, silently hiding an unchecked
-  task or swapping the verification command. This case is now rejected instead of guessed at.
-- A spec containing a GFM table used to crash the check; it's now rejected with a clear error.
-- A checked task titled like `**Status:** Completed` could slip past detection; it's now caught.
-- A checkbox preceded by a list marker on an over-indented continuation line was not recognized
-  as a hidden task; it's now caught.
-- An unclosed code fence was accepted even though the template requires closed fences, which
-  could let verification info end up hidden inside it; unclosed fences are now rejected.
-- `sdd-verify --task` could misplace evidence, or fail to check the box, when a task's list
-  marker was nested on the same line.
-- `sdd-verify --task` could silently delete a task nested under the previous task's evidence.
-- `sdd-verify --task` now refuses to run on a spec with unresolved problems, matching the check
-  `--record` already performed.
+- Fixed a rare case where the spec parser could read a list item differently than GitHub does,
+  which could hide a task or change the recorded verification command.
+- Fixed a crash when the spec contains a table.
+- Fixed a checked task that could be misread and skip validation.
+- Fixed a hidden task not being detected in some cases.
+- Fixed unclosed code fences being accepted when the spec requires them closed.
+- Fixed `sdd-verify --task` misplacing evidence in some cases.
+- Fixed `sdd-verify --task` silently deleting other task data in some cases.
+- Fixed `sdd-verify --task` not checking for existing spec problems before writing evidence.
 - `sdd-verify --task` wrote evidence at 2 spaces under numbered tasks, which rendered outside
   the list item; evidence now goes at the item's content column.
-- The secret scanner flagged pnpm/yarn lockfile dependency specifiers ending in `token` (a
-  scoped package name such as `@solana/spl-token`) as a secret assignment; a value containing
-  the parens a peer-dependency range uses is no longer treated as a credential.
+- Fixed a false positive in the secret scanner for some lockfile entries.
 - The secret scanner skipped any file named `verify-no-secrets.js`, any lockfile, and any path
   containing `node_modules/`; it now skips only its own installed paths and `node_modules/` path
   segments, as documented in the README. Lockfiles are scanned: a private-registry URL can embed
