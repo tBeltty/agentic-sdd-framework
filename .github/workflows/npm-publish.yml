@@ -37,8 +37,24 @@ jobs:
             exit 1
           fi
 
+      # A version already on npm (for example, one published manually before this
+      # workflow existed) is not an error: publishing is skipped instead of failing.
+      - name: Check whether this version is already on npm
+        id: check
+        run: |
+          PKG_NAME="$(node -p "require('./package.json').name")"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if npm view "$PKG_NAME@$PKG_VERSION" version >/dev/null 2>&1; then
+            echo "$PKG_NAME@$PKG_VERSION is already on npm; skipping publish."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run Framework Tests
+        if: steps.check.outputs.exists != 'true'
         run: npm test
 
       - name: Publish to npm
+        if: steps.check.outputs.exists != 'true'
         run: npm publish
