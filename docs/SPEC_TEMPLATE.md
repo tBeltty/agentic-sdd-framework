@@ -5,7 +5,7 @@
 **Author:** [Author Name]  
 **Target Completion:** [Date]  
 
-> The quality gate enforces this document. Status must be `Draft`, `In Progress`, or `Completed`. A checked task needs evidence: record it with `sdd-verify --task <ID> -- <command>`, or paste the command and its output. `In Progress` and `Completed` need a real verification command and expected output. `Completed` needs every task checked and a PASS recorded by `sdd-verify --record` for the exact content being completed; change a file afterwards and the PASS no longer counts.
+> The quality gate enforces this document. Status must be `Draft`, `In Progress`, or `Completed`. A checked task needs evidence: record it with `sdd-verify --task <ID> -- <command>`, or paste the command and its output. `In Progress` and `Completed` need a real verification command and expected output. `Completed` needs every task checked and a PASS recorded by `sdd-verify --record` for the exact content being completed; change a file afterwards and the PASS no longer counts. Keep to plain Markdown (spaces for indentation, closed fences, no raw HTML): the gate rejects markup it cannot read exactly as it renders.
 
 ---
 

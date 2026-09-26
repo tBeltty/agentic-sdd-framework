@@ -210,7 +210,9 @@ test('R4: secret-named keys ending in _key, and unquoted values in shell, rc and
         [`export API_TOKEN=${value}`, 'deploy.sh'],
         [`export AWS_SECRET_ACCESS_KEY=${value}`, '.envrc'],
         [`ENV STRIPE_SECRET=${value}`, 'Dockerfile'],
-        [`ENV STRIPE_SECRET ${value}`, 'docker/api.Dockerfile']
+        [`ENV STRIPE_SECRET ${value}`, 'docker/api.Dockerfile'],
+        [`set API_TOKEN=${value}`, 'deploy.cmd'],
+        ['set DB_PASSWORD=S3cretPassw0rd', 'setup.bat']
     ]) {
         assert.strictEqual(found(line, file)[0]?.patternName, 'Secret Assignment', `${file}: ${line}`);
     }
@@ -221,6 +223,8 @@ test('R4: secret-named keys ending in _key, and unquoted values in shell, rc and
         ['primary_key = compute_primary_key(row)', 'a.py'],
         ['$password = Read-Host "Enter password" -AsSecureString', 'deploy.ps1'],
         ['$credential = Get-Credential', 'deploy.ps1'],
+        ['set /p DB_PASSWORD=Enter the database password:', 'setup.bat'],
+        ['set API_TOKEN=%API_TOKEN%', 'deploy.cmd'],
         ['$token = Get-AzAccessToken -ResourceUrl $url', 'deploy.ps1'],
         ['$securePassword = ConvertTo-SecureString $plain -AsPlainText -Force', 'deploy.ps1']
     ]) {

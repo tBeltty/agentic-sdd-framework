@@ -162,7 +162,7 @@ test('R17: a multi-line inline comment cannot swap the Status', () => {
     const text = spec({ status: 'Completed' }).replace('**Status:** Completed', '**Status:** Draft')
         .replace(/(\*\*Specification Mode:\*\*[^\n]*?)\s*\n\*\*Status:\*\* Draft/, '$1 <!--\n**Status:** Draft\n--> **Status:** Completed');
     assert.match(text, /<!--\n\*\*Status:\*\* Draft\n-->/, 'fixture must wrap the Status line');
-    assert.match(lint(text).join(), /inline HTML comment \("<!--"\) is not closed on the same line/);
+    assert.match(lint(text).join(), /raw HTML is not supported/);
 });
 
 test('R18: a fence indented into an indented code block does not hide the tasks after it', () => {
@@ -176,7 +176,7 @@ test('R18: a fence indented into an indented code block does not hide the tasks 
 });
 
 test('R19: raw <script>, <style>, or <textarea> tags are rejected; code spans that mention them are not', () => {
-    assert.match(lint(spec({ status: 'Draft' }) + '\n<style>\n**Status:** Completed\n</style>\n').join(), /raw HTML tags/);
+    assert.match(lint(spec({ status: 'Draft' }) + '\n<style>\n**Status:** Completed\n</style>\n').join(), /raw HTML is not supported/);
     assert.deepStrictEqual(lint(spec({ status: 'Draft' }) + '\nThe page loads `<script src="app.js">` last.\n'), []);
 });
 

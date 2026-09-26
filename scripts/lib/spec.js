@@ -23,6 +23,9 @@
 
 const crypto = require('crypto');
 const { normalizeEol, detectEol, createFenceTracker } = require('./markdown');
+const {
+    TASK_RE, LIST_ITEM_RE, indentOf, stripQuote, commentLines, uncommented, visibleLines, ambiguousMarkup
+} = require('./spec-markup');
 
 const STATUSES = ['draft', 'in progress', 'completed'];
 
@@ -32,97 +35,13 @@ const STATUSES = ['draft', 'in progress', 'completed'];
 const isPlaceholder = text => /^\[[^\]]*\]$/.test(text.trim());
 
 const TEMPLATE_STATUS = 'Draft | In Progress | Completed';
-const TASK_RE = /^(\s*)(?:[*+-]|\d+[.)])\s+\[( |x|X)\]\s+(.*)$/;
 const FIELD_RE = /^(\s*)[*+-]\s+\*\*([^*]+):\*\*\s*(.*)$/;
 const LAST_VERIFIED_RE = /^\s*[*+-]\s+\*\*Last Verified:\*\*\s*(.*)$/;
 const LAST_VERIFIED_VALUE_RE =
     /^(\d{4}-\d{2}-\d{2}) (PASS|FAIL) \(commit ([^,()]+), exit ([^,()]+), state ([0-9a-f]{16}), check ([0-9a-f]{16})\)$/;
 const RECORDED_EVIDENCE_RE = /^sdd-verify (\d{4}-\d{2}-\d{2}), exit (-?\d+|timeout|signal \w+), sha256 ([0-9a-f]{16})$/;
 
-const indentOf = line => line.match(/^\s*/)[0].length;
 const shortHash = text => crypto.createHash('sha256').update(text).digest('hex').slice(0, 16);
-const stripQuote = line => line.replace(/^(\s*>\s?)+/, '');
-
-// Spec structure that must never sit inside an HTML comment.
-const STRUCTURE_RE = /\[( |x|X)\]|\*\*(?:Status|Verification Command|Expected Output|Last Verified|Evidence):\*\*|`{3,}|~{3,}/i;
-
-// Marks the lines of HTML comment blocks: a line whose content starts with `<!--` (outside
-// fenced code) opens one, and the first line containing `-->` after it closes it.
-function commentLines(lines) {
-    const fence = createFenceTracker();
-    let inComment = false;
-    return lines.map(line => {
-        if (inComment) {
-            if (line.includes('-->')) inComment = false;
-            return true;
-        }
-        if (fence.update(line) || fence.inside) return false;
-        const content = stripQuote(line).trimStart();
-        if (!content.startsWith('<!--')) return false;
-        inComment = !content.slice(4).includes('-->');
-        return true;
-    });
-}
-
-// Blanks HTML comment blocks (keeping line numbers).
-const uncommented = (lines, hidden) => lines.map((line, i) => (hidden[i] ? '' : line));
-
-// Lines that render as content: also blanks fenced code.
-function visibleLines(lines, hidden = commentLines(lines)) {
-    const fence = createFenceTracker();
-    return uncommented(lines, hidden).map(line => (fence.update(line) || fence.inside ? '' : line));
-}
-
-const LIST_ITEM_RE = /^(\s*)([*+-]|\d+[.)])(\s+)\S/;
-const HIDING_TAG_RE = /<\/?(?:script|style|textarea|template|noscript|title|xmp|iframe|noembed|noframes|plaintext)\b/i;
-const withoutCodeSpans = line => line.replace(/(`+)[^`]*?\1/g, '');
-
-// Largest indentation a fence opening at lines[at] may have and still be a fence: 3 spaces
-// past the content of the list item containing it, or 3 at the top level.
-function maxFenceIndent(lines, at) {
-    let minIndent = Infinity;
-    for (let i = at - 1; i >= 0; i--) {
-        const line = lines[i];
-        if (line.trim() === '') continue;
-        const item = line.match(LIST_ITEM_RE);
-        if (item) {
-            const content = item[1].length + item[2].length + Math.min(item[3].length, 4);
-            if (minIndent >= content && indentOf(lines[at]) >= content) return content + 3;
-        }
-        minIndent = Math.min(minIndent, indentOf(line));
-        if (minIndent === 0 && !item) return 3;
-    }
-    return 3;
-}
-
-// Problems for markup whose rendering could differ from what the parser reads.
-function ambiguousMarkup(lines, hidden) {
-    const problems = [];
-    const at = (i, what) => problems.push(`Line ${i + 1}: ${what}`);
-    const unquoted = lines.map(stripQuote);
-    const fence = createFenceTracker();
-    unquoted.forEach((line, i) => {
-        if (hidden[i]) {
-            if (STRUCTURE_RE.test(line)) at(i, 'an HTML comment holds spec structure (a task, Status, gate field, or code fence). Move it out of the comment or delete it.');
-            return;
-        }
-        const wasInside = fence.inside;
-        if (fence.update(line)) {
-            if (!wasInside && indentOf(line) > maxFenceIndent(unquoted, i)) {
-                at(i, `this fence is indented ${indentOf(line)} spaces, so Markdown renders it as indented code and everything after it stays visible. Indent it at most 3 spaces past its list item.`);
-            }
-            return;
-        }
-        if (fence.inside) return;
-        const prose = withoutCodeSpans(line);
-        const open = prose.indexOf('<!--');
-        if (open !== -1 && !prose.includes('-->', open + 4)) {
-            at(i, 'an inline HTML comment ("<!--") is not closed on the same line, so it may hide the lines after it. Close it on this line or remove it.');
-        }
-        if (HIDING_TAG_RE.test(prose)) at(i, 'raw HTML tags such as <script>, <style>, or <textarea> hide or alter what renders. Remove them from the specification.');
-    });
-    return problems;
-}
 
 // Integrity hash of task evidence: date, exit code and transcript together.
 function evidenceHash(date, exit, transcript) {
@@ -323,7 +242,10 @@ function withTaskEvidence(rawText, taskId, evidence) {
     const task = parseTasks(lines).find(t => t.id === taskId);
     if (!task) throw new Error(`Task ${taskId} not found in the specification.`);
     if (task.quoted) throw new Error(`Task ${taskId} is inside a blockquote; move it out before recording evidence.`);
-    const indent = indentOf(lines[task.line]) + 2;
+    // Evidence goes at the item's content column ("* " is 2, "1. " is 3, "10. " is 4), so
+    // it renders inside the list item.
+    const item = lines[task.line].match(LIST_ITEM_RE);
+    const indent = item[1].length + item[2].length + (item[3] ? item[3].length : 1);
     const block = formatRecordedEvidence({ ...evidence, indent });
     if (task.evidence.range) {
         const [start, end] = task.evidence.range;

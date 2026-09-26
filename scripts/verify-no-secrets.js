@@ -48,9 +48,9 @@ const SECRET_PATTERNS = [
 const SECRET_KEY_RE = /(?:^|[^A-Za-z0-9_])([A-Za-z0-9_.-]*?(?:secret|token|passw(?:or)?d|pwd|credentials?|(?:api|private|access|secret|signing|encryption|master)[_-]?key))["']?\s*[:=]\s*(.*)$/i;
 const PASSWORD_KEY_RE = /passw(?:or)?d|pwd|secret|credential/i;
 // Files where an unquoted value is a literal (KEY=value), not a code expression: env and
-// config files, package manager rc files, POSIX shell scripts, and Dockerfiles. PowerShell
+// config files, package manager rc files, shell and batch scripts, and Dockerfiles. PowerShell
 // is not included: its right-hand sides are expressions (Read-Host, Get-Credential, ...).
-const CONFIG_FILE_RE = /(^|\/)(\.env[^/]*|\.npmrc|\.pypirc|\.yarnrc(\.yml)?|Dockerfile[^/]*|Containerfile)$|\.(env|ini|cfg|conf|properties|toml|ya?ml|json|sh|bash|zsh|tfvars|dockerfile)$/i;
+const CONFIG_FILE_RE = /(^|\/)(\.env[^/]*|\.npmrc|\.pypirc|\.yarnrc(\.yml)?|Dockerfile[^/]*|Containerfile)$|\.(env|ini|cfg|conf|properties|toml|ya?ml|json|sh|bash|zsh|bat|cmd|tfvars|dockerfile)$/i;
 
 // Shannon entropy in bits per character.
 function entropy(value) {
@@ -82,6 +82,8 @@ const isPlaceholder = value => SAFE_PLACEHOLDERS.some(p => value.toLowerCase().i
 function secretAssignment(rawLine, { configFile }) {
     // Dockerfile legacy form `ENV KEY value` is `ENV KEY=value`.
     const line = configFile ? rawLine.replace(/^(\s*(?:ENV|ARG)\s+)([A-Za-z_][A-Za-z0-9_]*)\s+(?=\S)/i, '$1$2=') : rawLine;
+    // `set /p NAME=Prompt:` in a batch file reads input; the text is a prompt, not a value.
+    if (configFile && /^\s*set\s+\/p\b/i.test(line)) return null;
     const match = line.match(SECRET_KEY_RE);
     if (!match) return null;
     const [, key, rest] = match;

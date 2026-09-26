@@ -23,7 +23,7 @@ for recorded evidence) again before pushing a `Completed` spec.
 - `sdd-init` reuses the answers stored in an existing `sdd.config.json` as defaults; only explicit
   flags override them. The spec and Rigor documents are created at the configured
   `specification.specFile` and `specification.roadmapDir`.
-- Rigor mode requires `auditkit` 0.3.3 or newer. CI pins the protocol repository to v0.3.3.
+- Rigor mode requires `auditkit` 0.3.4 or newer. CI pins the protocol repository to v0.3.4.
 - Check scripts reject unknown flags (a typo checked the working tree instead) and accept
   `--ref <commit>` as well as `--ref=<commit>`.
 - Config paths must be canonical (`docs/SPEC.md`, not `./docs/SPEC.md`), and `specFile` and
@@ -44,9 +44,16 @@ for recorded evidence) again before pushing a `Completed` spec.
 - In a shallow clone, a Completed spec failed with a misleading state mismatch. A depth-1 clone
   whose newest commit completed the spec now passes; otherwise the failure explains that the full
   history is needed.
-- More spec markup the parser could misread is rejected instead of guessed: an inline `<!--`
-  not closed on the same line, raw `<script>`/`<style>`/`<textarea>` tags, and a fence indented
-  so far that it renders as indented code.
+- The spec parser read some Markdown differently from GitHub, which could hide an unchecked
+  task or swap the Status (inline and indented comments, fences left open in a list item,
+  over-indented or tab-indented fences, escaped backticks, multi-line link reference
+  definitions, raw HTML blocks, Status variants such as `**Status**:`). The spec is now held to
+  a strict Markdown subset in which the parse matches the rendering, and markup outside it
+  fails with the line and the fix. Checked with a differential fuzz against a CommonMark
+  renderer: no accepted spec rendered an unchecked task or a Status the parser missed.
+- `sdd-verify --task` wrote evidence at 2 spaces under numbered tasks, which rendered outside
+  the list item; evidence now goes at the item's content column.
+- Plain-text values in Windows batch files (`set API_TOKEN=...`) were not scanned as literals.
 - `scripts/dev/sync-vendored.js` treated a mistyped flag as a write; unknown flags are errors.
 - The secret scanner reported expressions assigned to secret-named keys (`password = getPassword()`)
   and missed unquoted values in config, rc, shell, and Docker files and keys such as `SECRET_KEY`; one placeholder on a line hid a real key later on the

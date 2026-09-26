@@ -58,7 +58,7 @@ graph TD
   * `execution-guide.md`: the "how" (numbered tasks `P<phase>-T<n>` and gates `P<phase>-G<n>`).
   * `compliance-log.md`: the ledger of pasted command output and verdicts.
   * `annexes/`: self-contained remediation orders issued after a verdict that is not a clean `APPROVED`.
-* **Mechanical Checks:** the quality gate runs `auditkit lint` (0.3.3 or newer), which rejects missing or orphaned task entries, gates without a negative control, and `DONE` reports without pasted verify output.
+* **Mechanical Checks:** the quality gate runs `auditkit lint` (0.3.4 or newer), which rejects missing or orphaned task entries, gates without a negative control, and `DONE` reports without pasted verify output.
 * **Best For:** Multi-agent handoffs, asynchronous work, and regulated domains.
 
 ---
@@ -159,12 +159,14 @@ The secret scanner reports provider keys (Anthropic, OpenAI, Stripe, GitHub, Sla
 
 | Mode | Rule |
 | :--- | :--- |
-| Lite, any status | Exactly one Status line: `Draft`, `In Progress`, or `Completed`; the `Verification Gate` section exists; every checked task (any checkbox list item, blockquotes included) has evidence; no HTML comment block holds a task, Status, gate field, or code fence |
+| Lite, any status | Exactly one Status line: `Draft`, `In Progress`, or `Completed`; the `Verification Gate` section exists; every checked task (any checkbox list item, blockquotes included) has evidence; the spec stays within the supported Markdown subset (below) |
 | Lite, recorded evidence | Evidence written by `sdd-verify --task` must be unedited (the hash covers the date, exit code, and transcript) and exit 0 |
 | Lite, hand-written evidence | Accepted and counted in the report; rejected when `specification.requireRecordedEvidence` is `true` |
 | Lite, `In Progress` | The verification command and expected output are filled in, not template placeholders |
 | Lite, `Completed` | Every task is checked, and `Last Verified` is an unedited PASS written by `sdd-verify --record` for the current verification command and expected output, whose state fingerprint matches the content the spec was completed with |
 | Rigor | `auditkit lint docs/roadmap` exits 0 |
+
+The spec is written in a strict subset of Markdown, so that what the gate reads is exactly what GitHub renders: spaces instead of tabs for indentation, closed fences indented at most 3 spaces past their list item (with no content line indented less than the fence, and none inside blockquotes), backticks paired on each line, no raw HTML outside code except whole-line comment blocks at column 0 that hold no spec structure, one-line link reference definitions, and the Status and gate fields written exactly as in the template. Anything else fails with the line number and what to change; the template and everything `sdd-verify` writes stay inside the subset.
 
 `sdd-verify --record` runs the spec's verification command, checks that every expected line appears in the output (`/.../` lines are regular expressions), fails if the command modified tracked files, and writes `Last Verified: <date> PASS|FAIL (commit <sha>, exit <code>, state <fingerprint>, check <hash>)`. The fingerprint covers every tracked file except the spec. The check hash covers the other fields plus the verification command and expected output, so editing the result, or changing the command after recording, reopens the spec. `--record` refuses to run while there are untracked files, because they would take part in the run without being part of the recorded state; commit, ignore, or remove them first. The gate recomputes it for the commit that completed the spec (or the uncommitted state), so files changed after the verification invalidate the PASS. Later commits that do not touch the spec do not reopen it: catching regressions after a spec is closed is the job of CI and tests.
 
