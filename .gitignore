@@ -65,3 +65,5 @@ yarn-error.log*
 
 # Canonical protocol checkout used by CI drift checks
 .canonical/
+.sdd/session-log.jsonl
+.sdd/current-task
