@@ -6,13 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Install a specific release
 with `npx github:tBeltty/agentic-sdd-framework#v<version>`.
 
-## [Unreleased]
+## [1.5.0] - 2026-09-27
 
 ### Added
 - Constitution check: a non-blocking gate step that warns when a critical constitution rule is missing or the constitution is empty.
 - `sdd-init --rules=all|critical|none` to choose which default constitution rules the wizard writes.
 - `sdd-add-rule` to add a constitution rule correctly after day-0, with `--fulfills=<id>` for a custom equivalent of a default rule.
 - The constitution's Author Attribution rule now also requires confirming `git config user.email`/`user.name` before a repository's first commit, instead of trusting whatever identity the global git default resolves to.
+- `fix-and-verify` skill: reproduce a bug report before diagnosing it, verify a UI-facing fix by driving the interface instead of trusting a green test suite, and never claim credit for stopping a process the agent didn't itself spawn.
+- The Mandatory Verification rule now also covers UI-render evidence and requires naming the exact identifier (PID, handle, container id) behind any claim of having stopped, cleaned up, or removed a process or resource.
 
 ### Fixed
 - `sdd-init`'s default `sdd.config.json` no longer claims "clean-architecture" for every new project; it says the style is not yet decided until the discovery interview records one.
