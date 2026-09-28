@@ -16,6 +16,7 @@ const path = require('path');
 const { install: installHook } = require('../install-git-hooks');
 const { validateConfig, getIn } = require('./config');
 const { CRITICAL_IDS } = require('./constitution-rules');
+const { writeClaudeSettings, ensureGitignoreEntries } = require('./guardrails-provision');
 
 const FRAMEWORK_ROOT = path.resolve(__dirname, '..', '..');
 const MANAGED_MARKER = 'sdd:managed';
@@ -29,7 +30,7 @@ const TOOL_DIR = '.sdd/scripts';
 const TOOL_FILES = [
     'quality-gate.js', 'verify-no-secrets.js', 'check-copy-slop.js', 'check-file-size.js', 'check-spec.js',
     'check-constitution.js', 'check-versions.js', 'check-system-prerequisites.js', 'install-git-hooks.js',
-    'sdd-verify.js', 'sdd-add-rule.js', 'lib'
+    'sdd-verify.js', 'sdd-add-rule.js', 'hooks-handler.js', 'sdd-report.js', 'lib'
 ];
 const TEMPLATES = [
     '.agents/AGENTS.template.md',
@@ -92,7 +93,7 @@ function normalizeAnswers(answers) {
     if (!RULE_SELECTIONS.includes(rules)) {
         throw new Error(`Unknown rules selection "${answers.rules}". Valid: ${RULE_SELECTIONS.join(', ')}.`);
     }
-    return { ...answers, specMode, rules };
+    return { ...answers, specMode, rules, guardrails: answers.guardrails === true };
 }
 
 // Keeps or drops the wizard's 8 default rule blocks in .agents/AGENTS.md, tagged
@@ -131,7 +132,8 @@ function buildConfig(answers, existing) {
         capabilities: {
             astNavigation: { adapter: answers.astAdapter },
             i18n: { enabled: answers.i18n },
-            pwa: { enabled: answers.pwa }
+            pwa: { enabled: answers.pwa },
+            ...(answers.guardrails ? { guardrails: { enabled: true } } : {})
         }
     };
     const merged = deepMerge(deepMerge(defaults, existing || {}), generated);
@@ -337,6 +339,15 @@ function provision(rawAnswers, { target = process.cwd(), force = false, log = co
         hookInstalled = true;
     } catch (error) {
         record('skipped', `pre-push hook: ${error.message}`);
+    }
+
+    // 6. Session-log guardrail (opt-in, --guardrails): Claude Code hooks + gitignore
+    //    entries for the local, per-session files it writes. See docs/guides/AGENT_HOOKS.md.
+    if (answers.guardrails) {
+        const hooksHandlerScript = installMode ? at(`${TOOL_DIR}/hooks-handler.js`) : path.join(FRAMEWORK_ROOT, 'scripts/hooks-handler.js');
+        const hooksHandlerCommand = `node ${path.relative(root, hooksHandlerScript).split(path.sep).join('/')} --adapter=claude-code`;
+        writeClaudeSettings(at, record, hooksHandlerCommand);
+        ensureGitignoreEntries(at, record, ['.sdd/session-log.jsonl', '.sdd/current-task']);
     }
 
     return { installMode, root, gateCommand, hookInstalled, config, skippedEntrypoints };

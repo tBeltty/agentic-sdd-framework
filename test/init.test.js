@@ -275,3 +275,63 @@ test('R33: where symlinks are unavailable, the copied skills do not fail the pro
     const gate = spawnSync(process.execPath, ['.sdd/scripts/quality-gate.js'], { cwd: project, encoding: 'utf8' });
     assert.strictEqual(gate.status, 0, gate.stdout + gate.stderr);
 });
+
+test('--guardrails wires .claude/settings.json hooks, gitignores the session log, and the gate still passes', () => {
+    const project = tempRepo();
+    init(project, '--guardrails');
+
+    const settings = JSON.parse(read(project, '.claude/settings.json'));
+    assert.strictEqual(settings.hooks.PreToolUse[0].matcher, 'Bash');
+    assert.match(settings.hooks.PreToolUse[0].hooks[0].command, /hooks-handler\.js --adapter=claude-code/);
+    assert.match(settings.hooks.PostToolUse[0].hooks[0].command, /hooks-handler\.js --adapter=claude-code/);
+
+    const gitignore = read(project, '.gitignore');
+    assert.match(gitignore, /\.sdd\/session-log\.jsonl/);
+    assert.match(gitignore, /\.sdd\/current-task/);
+
+    const config = JSON.parse(read(project, 'sdd.config.json'));
+    assert.strictEqual(config.capabilities.guardrails.enabled, true);
+    assert.ok(exists(project, '.sdd/scripts/hooks-handler.js'));
+
+    git(project, 'add', '-A');
+    execFileSync(process.execPath, ['.sdd/scripts/quality-gate.js'], { cwd: project, stdio: 'pipe' });
+});
+
+test('--guardrails merges into an existing .claude/settings.json instead of overwriting it', () => {
+    const project = tempRepo();
+    writeFiles(project, {
+        '.claude/settings.json': JSON.stringify({ hooks: { PreToolUse: [{ matcher: 'Write', hooks: [{ type: 'command', command: 'echo unrelated' }] }] } })
+    });
+    init(project, '--guardrails');
+
+    const settings = JSON.parse(read(project, '.claude/settings.json'));
+    assert.strictEqual(settings.hooks.PreToolUse.length, 2);
+    assert.strictEqual(settings.hooks.PreToolUse[0].matcher, 'Write');
+    assert.match(settings.hooks.PreToolUse[0].hooks[0].command, /echo unrelated/);
+    assert.match(settings.hooks.PreToolUse[1].hooks[0].command, /hooks-handler\.js/);
+});
+
+test('rerunning --guardrails does not duplicate the hook entry', () => {
+    const project = tempRepo();
+    init(project, '--guardrails');
+    init(project, '--guardrails');
+    const settings = JSON.parse(read(project, '.claude/settings.json'));
+    assert.strictEqual(settings.hooks.PreToolUse.length, 1);
+});
+
+test('--guardrails preserves an unrelated existing .gitignore and only appends missing entries', () => {
+    const project = tempRepo();
+    writeFiles(project, { '.gitignore': 'node_modules/\n' });
+    init(project, '--guardrails');
+    const gitignore = read(project, '.gitignore');
+    assert.match(gitignore, /node_modules\//);
+    assert.match(gitignore, /\.sdd\/session-log\.jsonl/);
+});
+
+test('without --guardrails, no .claude/settings.json or guardrails config is written', () => {
+    const project = tempRepo();
+    init(project);
+    assert.ok(!exists(project, '.claude/settings.json'));
+    const config = JSON.parse(read(project, 'sdd.config.json'));
+    assert.strictEqual(config.capabilities.guardrails, undefined);
+});

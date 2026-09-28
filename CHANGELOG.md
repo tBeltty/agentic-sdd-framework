@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Install a specific release
 with `npx github:tBeltty/agentic-sdd-framework#v<version>`.
 
+## [Unreleased]
+
+### Added
+- `sdd-init --guardrails` (opt-in): logs an agent's tool activity to
+  `.sdd/session-log.jsonl` and denies a raw `kill`/`pkill`/`killall` Bash command instead
+  of just recording it. Agent-agnostic event schema; only `hook-adapters/claude-code.js`
+  ships today. See `docs/guides/AGENT_HOOKS.md` for the schema and this guardrail's scope.
+- `node scripts/sdd-report.js` (`npm run report`): a local HTML report combining the
+  spec's evidence, the session log, and recent git history. Informational only.
+- `sdd.config.json`: `capabilities.guardrails.enabled` to disable the deny behavior while
+  keeping the log.
+
 ## [1.5.0] - 2026-09-27
 
 ### Added
@@ -126,3 +138,11 @@ for recorded evidence) again before pushing a `Completed` spec.
 - Initial release: constitution and context templates, Lite and Rigor specification templates,
   strategic-cto, no-ai-slop, ast-navigator, and auditor-executor-protocol skills, bootstrapping
   wizard, and quality gate scripts.
+
+[Unreleased]: https://github.com/tBeltty/agentic-sdd-framework/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/tBeltty/agentic-sdd-framework/compare/v1.4.0...v1.5.0
+[1.4.0]: https://github.com/tBeltty/agentic-sdd-framework/compare/v1.3.0...v1.4.0
+[1.3.0]: https://github.com/tBeltty/agentic-sdd-framework/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/tBeltty/agentic-sdd-framework/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/tBeltty/agentic-sdd-framework/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/tBeltty/agentic-sdd-framework/releases/tag/v1.0.0

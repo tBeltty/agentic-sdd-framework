@@ -84,6 +84,24 @@ node scripts/sdd-init.js
 
 ---
 
+## Optional: Session Log & Guardrails
+
+`sdd-init --guardrails` adds a fourth, opt-in capability: a session activity log
+(`.sdd/session-log.jsonl`) recording what an agent actually did, and a guardrail that
+denies a raw `kill`/`pkill`/`killall` Bash command instead of letting an agent grab an
+arbitrary PID off `ps`/`lsof` and kill the wrong process. Run `node scripts/sdd-report.js`
+afterward for a local HTML report combining the log with the spec's evidence and recent
+git history.
+
+The event schema is agent-agnostic by design; the hook wiring itself is Claude-Code-only
+today (that's the only supported agent with a real PreToolUse/PostToolUse hook
+mechanism). See [docs/guides/AGENT_HOOKS.md](docs/guides/AGENT_HOOKS.md) for the schema,
+the adapter interface for wiring in another agent, and this guardrail's actual scope --
+it prevents the negligent case, it does not verify a stopped-process claim after the
+fact.
+
+---
+
 ## Progressive Modes: Lite vs. Rigor
 
 Projects start simple and scale as complexity grows. The mode is set in `sdd.config.json`.
@@ -115,6 +133,7 @@ Flags take `--flag=value` or `--flag value`. Unknown flags are an error.
 | `--ast=<adapter>` | `ast-grep`, `graphify`, `ripgrep`, `lsp` | `ast-grep` |
 | `--concurrency=`, `--hardware=`, `--workload=` | Discovery answers recorded in ADR-0001 | Small internal service |
 | `--i18n`, `--pwa` | Enable the capability flags | Disabled |
+| `--guardrails` | Session log + kill-command guardrail (see [Optional: Session Log & Guardrails](#optional-session-log--guardrails)) | Disabled |
 | `--force` | Refresh copied skills, templates, and `.claude/skills/` copies | Keep existing copies |
 | `--help` | Print usage | |
 
@@ -136,6 +155,7 @@ Rerunning the wizard is safe: existing documents are kept, `sdd.config.json` is 
 | `docs/decisions/ADR-0001-stack-and-architecture.md` | Stack decision record seeded with the discovery answers |
 | `sdd.config.json` | Configuration, validated against [`scripts/lib/sdd.config.schema.json`](scripts/lib/sdd.config.schema.json) |
 | Git `pre-push` hook | Runs the quality gate on the pushed commits; an existing hook is kept as `pre-push.local` and runs first |
+| `.claude/settings.json` (`--guardrails` only) | Merged, not overwritten, into any existing hooks; wires `scripts/hooks-handler.js` |
 
 When `core.hooksPath` is set (Husky, lefthook, or a shared hooks directory), the wizard installs nothing there and prints the command to add instead.
 

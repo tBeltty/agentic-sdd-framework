@@ -30,7 +30,8 @@
     "add-rule": "node scripts/sdd-add-rule.js",
     "check:versions": "node scripts/check-versions.js",
     "install-hooks": "node scripts/install-git-hooks.js",
-    "quality-gate": "node scripts/quality-gate.js"
+    "quality-gate": "node scripts/quality-gate.js",
+    "report": "node scripts/sdd-report.js"
   },
   "keywords": [
     "sdd",

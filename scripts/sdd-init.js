@@ -20,6 +20,8 @@
  *   --concurrency=, --hardware=, --workload=   Discovery answers
  *   --rules=all|critical|none   Constitution rules to include (default: all)
  *   --i18n, --pwa         Enable the matching capability flags
+ *   --guardrails          Session log + kill-command guardrail (Claude Code hooks; opt-in,
+ *                         see docs/guides/AGENT_HOOKS.md)
  *   --force               Refresh copied skills and templates in install mode
  *   --help                Print this help
  */
@@ -32,11 +34,11 @@ const { FRAMEWORK_ROOT, provision } = require('./lib/provision');
 const { loadConfig, getIn } = require('./lib/config');
 
 const VALUE_FLAGS = ['target', 'name', 'runtime', 'mode', 'ast', 'concurrency', 'hardware', 'workload', 'rules'];
-const BOOLEAN_FLAGS = ['express', 'i18n', 'pwa', 'force', 'help'];
+const BOOLEAN_FLAGS = ['express', 'i18n', 'pwa', 'guardrails', 'force', 'help'];
 const USAGE = `Usage: sdd-init [--express] [--target=<dir>] [--name=<name>] [--runtime=<id>]
                 [--mode=lite|rigor] [--ast=ast-grep|graphify|ripgrep|lsp]
                 [--concurrency=<text>] [--hardware=<text>] [--workload=<text>]
-                [--rules=all|critical|none] [--i18n] [--pwa] [--force] [--help]`;
+                [--rules=all|critical|none] [--i18n] [--pwa] [--guardrails] [--force] [--help]`;
 
 function parseArgs(argv) {
     const values = new Map();
@@ -101,7 +103,8 @@ function loadExistingDefaults() {
         hardware: getIn(config, 'discovery.hardware'),
         workload: getIn(config, 'discovery.workload'),
         i18n: getIn(config, 'capabilities.i18n.enabled'),
-        pwa: getIn(config, 'capabilities.pwa.enabled')
+        pwa: getIn(config, 'capabilities.pwa.enabled'),
+        guardrails: getIn(config, 'capabilities.guardrails.enabled')
     };
 }
 
@@ -183,8 +186,14 @@ async function runGuidedMode() {
     const ruleChoices = { '1': 'all', '2': 'critical', '3': 'none' };
     const rules = ruleChoices[await ask('Select Rules (1-3)', '1')] || 'all';
 
+    console.log('\n--- Step 7: Session Log & Guardrails (optional) ---');
+    console.log('  Records what the agent actually did (files touched, commands run) instead of');
+    console.log('  trusting only its own report, and denies a raw kill/pkill/killall shell command.');
+    console.log('  Claude Code only for now; see docs/guides/AGENT_HOOKS.md to add another agent.');
+    const guardrails = await askYesNo('Enable the session log and kill-command guardrail?', EXISTING.guardrails === true);
+
     rl.close();
-    bootstrap({ projectName, runtime, specMode, astAdapter, rules, concurrency, hardware, workload, i18n, pwa });
+    bootstrap({ projectName, runtime, specMode, astAdapter, rules, concurrency, hardware, workload, i18n, pwa, guardrails });
 }
 
 function runExpressMode() {
@@ -200,7 +209,8 @@ function runExpressMode() {
         hardware: getArgValue('hardware', DEFAULTS.hardware),
         workload: getArgValue('workload', DEFAULTS.workload),
         i18n: parsed.flags.has('i18n') ? true : EXISTING.i18n === true,
-        pwa: parsed.flags.has('pwa') ? true : EXISTING.pwa === true
+        pwa: parsed.flags.has('pwa') ? true : EXISTING.pwa === true,
+        guardrails: parsed.flags.has('guardrails') ? true : EXISTING.guardrails === true
     });
 }
 
@@ -240,7 +250,13 @@ function bootstrap(answers) {
             console.log('     pipx install git+https://github.com/tBeltty/auditor-executor-protocol');
         }
     }
-    console.log(`  4. Quality gate: ${result.gateCommand}${result.hookInstalled ? ' (runs on every git push)' : ''}\n`);
+    console.log(`  4. Quality gate: ${result.gateCommand}${result.hookInstalled ? ' (runs on every git push)' : ''}`);
+    if (answers.guardrails) {
+        const reportScript = result.installMode ? '.sdd/scripts/sdd-report.js' : 'scripts/sdd-report.js';
+        console.log('  5. Session log + kill-command guardrail wired into .claude/settings.json.');
+        console.log(`     See docs/guides/AGENT_HOOKS.md. Try it: node ${reportScript} after a session.`);
+    }
+    console.log('');
 }
 
 if (wantsExpress) {
