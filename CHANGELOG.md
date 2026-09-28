@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Install a specific release
 with `npx github:tBeltty/agentic-sdd-framework#v<version>`.
 
-## [Unreleased]
+## [1.6.0] - 2026-09-28
 
 ### Added
 - `sdd-init --guardrails` (opt-in): logs an agent's tool activity to
@@ -139,7 +139,8 @@ for recorded evidence) again before pushing a `Completed` spec.
   strategic-cto, no-ai-slop, ast-navigator, and auditor-executor-protocol skills, bootstrapping
   wizard, and quality gate scripts.
 
-[Unreleased]: https://github.com/tBeltty/agentic-sdd-framework/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/tBeltty/agentic-sdd-framework/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/tBeltty/agentic-sdd-framework/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/tBeltty/agentic-sdd-framework/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/tBeltty/agentic-sdd-framework/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/tBeltty/agentic-sdd-framework/compare/v1.2.0...v1.3.0
