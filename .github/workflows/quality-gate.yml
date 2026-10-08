@@ -6,10 +6,6 @@ on:
   pull_request:
     branches: [ main ]
 
-# The protocol release this framework vendors and tests against.
-env:
-  PROTOCOL_VERSION: v0.3.9
-
 jobs:
   verify:
     name: Node ${{ matrix.node-version }} on ${{ matrix.os }}
@@ -34,18 +30,10 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
 
-      - name: Install auditkit (Rigor mode checks)
-        run: pipx install git+https://github.com/tBeltty/auditor-executor-protocol@${{ env.PROTOCOL_VERSION }}
-
-      - name: Check out the canonical protocol repository
-        uses: actions/checkout@v7
-        with:
-          repository: tBeltty/auditor-executor-protocol
-          ref: ${{ env.PROTOCOL_VERSION }}
-          path: .canonical
-
-      - name: Check vendored protocol files against the canonical repository
-        run: node scripts/dev/sync-vendored.js .canonical --check
+      # The Auditor-Executor protocol is an external dependency: the latest release from
+      # PyPI, so CI catches a protocol change that breaks sdd-init or the Rigor gate.
+      - name: Install auditkit (Auditor-Executor protocol CLI)
+        run: pipx install auditor-executor-protocol
 
       - name: Run Framework Tests
         run: npm test

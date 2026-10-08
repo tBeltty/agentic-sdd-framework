@@ -17,12 +17,16 @@
  *       content, and scans every new commit's changed files for secrets. A ref whose
  *       commit is already on the remote (for example a tag on a published commit)
  *       publishes nothing new and is not checked again.
+ *
+ * Before the checks, every mode syncs the untracked Auditor-Executor protocol skill with
+ * the installed auditkit (lib/auditkit.js syncSkill). That step never fails the gate.
  */
 
 const fs = require('fs');
 const { git, repoRoot, describeSource } = require('./lib/git');
 const { parseCheckArgs } = require('./lib/cli');
 const secrets = require('./verify-no-secrets');
+const auditkit = require('./lib/auditkit');
 
 const CHECKS = [
     { title: '🔒 Secret Leak Scanner', module: secrets },
@@ -120,6 +124,26 @@ function runPush({ root, input, remoteName, log }) {
     return failed;
 }
 
+// Keeps the project's protocol skill at the installed auditkit's version. A skill still
+// tracked by git (projects provisioned before it was untracked) is left alone, so the gate
+// never dirties tracked files.
+function syncProtocolSkill(root, log) {
+    runOne('🧩 Auditor-Executor Protocol Skill', () => {
+        const skill = auditkit.SKILL_PATHS[0];
+        if (git(['ls-files', '--', ...auditkit.SKILL_PATHS], root).trim()) {
+            return { ok: true, report: `⏭️  ${skill} is tracked by git, so it is not updated automatically. Untrack it once with: git rm -r --cached ${auditkit.SKILL_PATHS.join(' ')} && rerun sdd-init` };
+        }
+        const synced = auditkit.syncSkill(root);
+        if (synced.status === 'skipped') return { ok: true, report: `⏭️  ${skill} not synced: ${synced.problem}` };
+        return {
+            ok: true,
+            report: synced.status === 'updated'
+                ? `🔄 ${skill} updated to the protocol in auditkit ${synced.version}.`
+                : `✅ ${skill} matches auditkit ${synced.version}.`
+        };
+    }, log);
+}
+
 function main(argv) {
     console.log('\n======================================================');
     console.log('  🚦 Agentic SDD Framework: Quality Gate');
@@ -128,6 +152,7 @@ function main(argv) {
     try {
         const options = parseCheckArgs(argv, { allowPush: true });
         const root = repoRoot();
+        syncProtocolSkill(root, console.log);
         if (options.push) {
             failed = runPush({ root, input: fs.readFileSync(0, 'utf8'), remoteName: options.remoteName, log: console.log });
         } else {
@@ -149,4 +174,4 @@ if (require.main === module) {
     process.exit(main(process.argv.slice(2)));
 }
 
-module.exports = { CHECKS, runChecks, runPush, parsePushInput, newCommits };
+module.exports = { CHECKS, runChecks, runPush, parsePushInput, newCommits, syncProtocolSkill };

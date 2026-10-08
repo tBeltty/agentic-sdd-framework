@@ -21,8 +21,8 @@ const { BANNED_PATTERNS } = require('./lib/slop-patterns');
 
 const PROSE_EXTENSIONS = ['.md', '.mdx', '.txt'];
 
-// The skill that defines the banned patterns must quote them; vendored skills and the
-// Rigor templates are synced from their upstream repositories and linted there. Rigor
+// The skill that defines the banned patterns must quote them; the protocol skill is
+// written by `auditkit install-skill` and linted in its own repository. Rigor
 // documents (specification.roadmapDir) are records in the protocol's format and hold
 // pasted command output.
 // sdd-init copies the skills into .claude/skills/ where symlinks are unavailable (Windows
@@ -31,8 +31,7 @@ const DEFAULT_EXCLUDE = [
     '.agents/skills/no-ai-slop/',
     '.agents/skills/auditor-executor-protocol/',
     '.claude/skills/no-ai-slop/',
-    '.claude/skills/auditor-executor-protocol/',
-    'docs/roadmap/templates/'
+    '.claude/skills/auditor-executor-protocol/'
 ];
 
 function lintContent(content, { maxEmDashes = 1 } = {}) {
