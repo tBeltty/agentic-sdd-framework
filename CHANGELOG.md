@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Install a specific release
 with `npx github:tBeltty/agentic-sdd-framework#v<version>`.
 
+## [Unreleased]
+
+### Changed
+- **Breaking:** the Auditor-Executor protocol is an external dependency. The framework no
+  longer ships copies of its skill (`.agents/skills/auditor-executor-protocol/`, the
+  `.claude/skills` link) or its Rigor templates (`docs/roadmap/templates/`). `sdd-init`
+  installs the skill with `auditkit install-skill` on every run and scaffolds Rigor documents
+  with `auditkit init`, so a project gets the protocol version of the installed `auditkit`.
+- `auditkit` is installed from PyPI (`pipx install auditor-executor-protocol`). The minimum is
+  0.5.1, the first release whose scaffolded execution guide passes its own `lint`; there is
+  no upper bound.
+- Rigor mode without `auditkit` (or with one older than 0.5.1) stops `sdd-init` before it
+  writes anything. Lite mode provisions as before and reports that the skill was skipped.
+- CI installs the latest `auditkit` from PyPI instead of a pinned Git tag.
+
+### Removed
+- `scripts/dev/sync-vendored.js` and the CI step that compared the vendored copies with a
+  pinned protocol release.
+
 ## [1.6.0] - 2026-09-28
 
 ### Added

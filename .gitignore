@@ -63,7 +63,9 @@ yarn-error.log*
 *.swp
 *.swo
 
-# Canonical protocol checkout used by CI drift checks
-.canonical/
+# The Auditor-Executor protocol is an external dependency (auditkit). Running sdd-init in
+# this checkout installs its skill locally; it must never be committed here.
+.agents/skills/auditor-executor-protocol/
+.claude/skills/auditor-executor-protocol
 .sdd/session-log.jsonl
 .sdd/current-task

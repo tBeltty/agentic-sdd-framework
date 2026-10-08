@@ -42,4 +42,10 @@ function runHook(hookPath, args, options) {
     return spawnSync(file, argv, { encoding: 'utf8', ...options });
 }
 
-module.exports = { tempDir, tempRepo, git, writeFiles, runHook };
+// Rigor mode and the protocol skill come from the installed auditkit (CI installs it).
+// Tests that need it are skipped without it; SDD_AUDITKIT points at a specific binary.
+const AUDITKIT = process.env.SDD_AUDITKIT || 'auditkit';
+const hasAuditkit = !spawnSync(AUDITKIT, ['--version']).error;
+const NEEDS_AUDITKIT = { skip: !hasAuditkit && 'auditkit not installed' };
+
+module.exports = { tempDir, tempRepo, git, writeFiles, runHook, AUDITKIT, hasAuditkit, NEEDS_AUDITKIT };

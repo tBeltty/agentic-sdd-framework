@@ -29,7 +29,7 @@
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
-const { execFileSync, spawnSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const { FRAMEWORK_ROOT, provision } = require('./lib/provision');
 const { loadConfig, getIn } = require('./lib/config');
 
@@ -245,10 +245,10 @@ function bootstrap(answers) {
         console.log(`  3. Define your tasks in ${specification.specFile || 'docs/SPEC.md'} and implement with verifiable gates.`);
     } else {
         console.log(`  3. Write ${specification.roadmapDir || 'docs/roadmap'}/plan-of-record.md and coordinate with the Auditor-Executor protocol.`);
-        if (spawnSync('auditkit', ['--version']).error) {
-            console.log('     Rigor mode is checked by auditkit, which is not installed. Install it with:');
-            console.log('     pipx install git+https://github.com/tBeltty/auditor-executor-protocol');
-        }
+    }
+    if (!result.protocol.ok) {
+        console.log('  ⚠️  The auditor-executor-protocol skill was not installed. ' + result.protocol.problem);
+        console.log('     Then rerun sdd-init to add the skill.');
     }
     console.log(`  4. Quality gate: ${result.gateCommand}${result.hookInstalled ? ' (runs on every git push)' : ''}`);
     if (answers.guardrails) {

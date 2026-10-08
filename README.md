@@ -111,7 +111,14 @@ Projects start simple and scale as complexity grows. The mode is set in `sdd.con
 | **Use it for** | Solo developers, utilities, early-stage MVPs | Multi-agent handoffs, asynchronous work, regulated domains |
 | **Spec lives in** | One file: `docs/SPEC.md` | `docs/roadmap/`: a plan, an execution guide, a compliance log, and remediation annexes |
 | **Format** | Tasks with recorded evidence and a verification gate | The [auditor-executor-protocol](https://github.com/tBeltty/auditor-executor-protocol) document set, with negative-control gates |
-| **Extra requirement** | None | Python 3.9+ and `auditkit`: `pipx install git+https://github.com/tBeltty/auditor-executor-protocol` |
+| **Extra requirement** | None | Python 3.11+ and `auditkit` 0.5.1 or newer: `pipx install auditor-executor-protocol` |
+
+The Auditor-Executor protocol is an external dependency. The framework keeps no copy of it:
+`sdd-init` writes the protocol skill with `auditkit install-skill` (in both modes, refreshed on
+every run) and the Rigor documents with `auditkit init`, and the gate checks them with
+`auditkit lint`. To move a project to a newer protocol release, run `pipx upgrade
+auditor-executor-protocol` and rerun `sdd-init`. Without `auditkit`, Lite mode still works and
+reports that the skill was skipped; Rigor mode stops before writing anything.
 
 ---
 
@@ -205,7 +212,6 @@ agentic-sdd-framework/
 │   ├── ENTRYPOINT.template.md     # Root AGENTS.md template
 │   └── skills/
 │       ├── strategic-cto/         # 4-Pillar Discovery, Anti-Bloat, ROI Verdict
-│       ├── auditor-executor-protocol/ # Execution protocol (tBeltty/auditor-executor-protocol)
 │       ├── no-ai-slop/            # Factual copy rules (petergyang/no-ai-slop)
 │       └── ast-navigator/         # Pluggable adapters (graphify, ast-grep, ripgrep, lsp)
 │
@@ -213,7 +219,6 @@ agentic-sdd-framework/
 │   ├── SPEC_TEMPLATE.md           # Lite Mode template
 │   ├── architecture/              # How the gate and spec integrity work internally
 │   ├── decisions/ADR_TEMPLATE.md  # Architecture Decision Record template
-│   ├── roadmap/templates/         # Rigor Mode templates (vendored from auditkit)
 │   ├── incidents/                 # Post-mortem template
 │   ├── guides/                    # Credential tiers, GitHub CLI setup
 │   └── guidelines/                # AST navigation adapter comparison

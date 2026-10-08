@@ -9,6 +9,10 @@
  * Clone mode:   target is the framework checkout itself; templates are used in place.
  * Install mode: target is another project; templates, skills and the quality gate
  *               tooling (.sdd/scripts/) are copied into it first.
+ *
+ * The Auditor-Executor protocol is not part of the framework: its skill and the Rigor
+ * documents are written by the installed auditkit (see lib/auditkit.js), never copied
+ * from this repository.
  */
 
 const fs = require('fs');
@@ -17,6 +21,7 @@ const { install: installHook } = require('../install-git-hooks');
 const { validateConfig, getIn } = require('./config');
 const { CRITICAL_IDS } = require('./constitution-rules');
 const { writeClaudeSettings, ensureGitignoreEntries } = require('./guardrails-provision');
+const auditkit = require('./auditkit');
 
 const FRAMEWORK_ROOT = path.resolve(__dirname, '..', '..');
 const MANAGED_MARKER = 'sdd:managed';
@@ -38,15 +43,12 @@ const TEMPLATES = [
     'docs/SPEC_TEMPLATE.md',
     'docs/decisions/ADR_TEMPLATE.md',
     'docs/incidents/0000-00-00-incident-template.md',
-    'docs/roadmap/templates/plan-of-record.md',
-    'docs/roadmap/templates/execution-guide.md',
-    'docs/roadmap/templates/compliance-log.md',
     'docs/guides/AGENT_CREDENTIALS.md',
     'docs/guides/GITHUB_CLI_SETUP.md',
     'docs/guidelines/AST_NAVIGATION.md'
 ];
-// Rigor documents use the auditkit format (tBeltty/auditor-executor-protocol) so `auditkit lint` can check them.
-const RIGOR_DOCS = ['plan-of-record', 'execution-guide', 'compliance-log'];
+// Installed by `auditkit install-skill`; a local copy in a framework checkout is never shipped.
+const PROTOCOL_SKILL = 'auditor-executor-protocol';
 const ICONS = { created: '✅', updated: '🔄', linked: '🔗', copied: '📄', kept: '⏭️ ', skipped: '⚠️ ', unchanged: '⏭️ ' };
 
 // String.prototype.replace would interpret "$5" in answers like "$5 VPS".
@@ -226,6 +228,12 @@ function provision(rawAnswers, { target = process.cwd(), force = false, log = co
     const record = (status, what) => log(`  ${ICONS[status]} ${what} (${status})`);
     const skippedEntrypoints = [];
 
+    // Rigor documents are scaffolded and linted by auditkit, so check it before writing anything.
+    const protocol = auditkit.check();
+    if (answers.specMode === 'rigor' && !protocol.ok) {
+        throw new Error(`Rigor mode needs the Auditor-Executor protocol's CLI. ${protocol.problem}`);
+    }
+
     const write = (rel, content) => {
         fs.mkdirSync(path.dirname(at(rel)), { recursive: true });
         fs.writeFileSync(at(rel), content);
@@ -262,7 +270,7 @@ function provision(rawAnswers, { target = process.cwd(), force = false, log = co
         const change = previous && previous !== frameworkVersion() ? ` from ${previous} to ${frameworkVersion()}` : ` at ${frameworkVersion()}`;
         record('updated', `${TOOL_DIR}/ (quality gate tooling${change})`);
         const skillsRoot = path.join(FRAMEWORK_ROOT, '.agents/skills');
-        for (const skill of fs.readdirSync(skillsRoot, { withFileTypes: true }).filter(d => d.isDirectory())) {
+        for (const skill of fs.readdirSync(skillsRoot, { withFileTypes: true }).filter(d => d.isDirectory() && d.name !== PROTOCOL_SKILL)) {
             const rel = `.agents/skills/${skill.name}`;
             if (fs.existsSync(at(rel)) && !force) { record('kept', rel); continue; }
             fs.cpSync(path.join(skillsRoot, skill.name), at(rel), { recursive: true });
@@ -274,6 +282,18 @@ function provision(rawAnswers, { target = process.cwd(), force = false, log = co
             fs.copyFileSync(path.join(FRAMEWORK_ROOT, rel), at(rel));
         }
         record('copied', 'templates and guides referenced by the skills');
+    }
+
+    // Protocol skill: owned by auditkit and refreshed on every run, so the project always
+    // carries the protocol version of the auditkit installed here.
+    const protocolSkill = `.agents/skills/${PROTOCOL_SKILL}`;
+    if (protocol.ok) {
+        // Remove first so reference files dropped upstream do not linger.
+        fs.rmSync(at(protocolSkill), { recursive: true, force: true });
+        auditkit.run(['install-skill', root, '--agent', 'antigravity', '--force']);
+        record('updated', `${protocolSkill} (auditkit ${protocol.version})`);
+    } else {
+        record('skipped', `${protocolSkill}: ${protocol.problem}`);
     }
 
     // 2. Capability manifest.
@@ -292,11 +312,9 @@ function provision(rawAnswers, { target = process.cwd(), force = false, log = co
     if (answers.specMode === 'lite') {
         createFromTemplate('docs/SPEC_TEMPLATE.md', specFile);
     } else {
-        for (const doc of RIGOR_DOCS) {
-            createFromTemplate(`docs/roadmap/templates/${doc}.md`, `${roadmapDir}/${doc}.md`,
-                t => replaceLiteral(t, '{{PROJECT_NAME}}', answers.projectName));
-        }
-        if (!fs.existsSync(at(`${roadmapDir}/annexes/.gitkeep`))) write(`${roadmapDir}/annexes/.gitkeep`, '');
+        // auditkit init keeps existing documents and adds annexes/.gitkeep.
+        auditkit.run(['init', at(roadmapDir), '--name', answers.projectName]);
+        record('created', `${roadmapDir}/ (auditkit init; existing documents kept)`);
     }
     createFromTemplate('docs/decisions/ADR_TEMPLATE.md', 'docs/decisions/ADR-0001-stack-and-architecture.md',
         t => fillAdr(t, answers, today));
@@ -350,7 +368,7 @@ function provision(rawAnswers, { target = process.cwd(), force = false, log = co
         ensureGitignoreEntries(at, record, ['.sdd/session-log.jsonl', '.sdd/current-task']);
     }
 
-    return { installMode, root, gateCommand, hookInstalled, config, skippedEntrypoints };
+    return { installMode, root, gateCommand, hookInstalled, config, skippedEntrypoints, protocol };
 }
 
 function isSymlink(file) {
