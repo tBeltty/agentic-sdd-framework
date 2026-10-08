@@ -114,11 +114,12 @@ Projects start simple and scale as complexity grows. The mode is set in `sdd.con
 | **Extra requirement** | None | Python 3.11+ and `auditkit` 0.5.1 or newer: `pipx install auditor-executor-protocol` |
 
 The Auditor-Executor protocol is an external dependency. The framework keeps no copy of it:
-`sdd-init` writes the protocol skill with `auditkit install-skill` (in both modes, refreshed on
-every run) and the Rigor documents with `auditkit init`, and the gate checks them with
-`auditkit lint`. To move a project to a newer protocol release, run `pipx upgrade
-auditor-executor-protocol` and rerun `sdd-init`. Without `auditkit`, Lite mode still works and
-reports that the skill was skipped; Rigor mode stops before writing anything.
+`sdd-init` scaffolds the Rigor documents with `auditkit init`, and the gate checks them with
+`auditkit lint`. The protocol skill (`.agents/skills/auditor-executor-protocol/`) is gitignored
+and rewritten from the installed `auditkit` by `sdd-init` and at the start of every gate run
+whenever the two differ, so `pipx upgrade auditor-executor-protocol` is the only step needed to
+move a project to a newer protocol release. Without `auditkit`, Lite mode still works and reports
+that the skill was skipped; Rigor mode stops before writing anything.
 
 ---
 

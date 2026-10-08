@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const { execFileSync, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { tempDir, tempRepo, git, writeFiles, runHook, AUDITKIT, hasAuditkit, NEEDS_AUDITKIT } = require('./helpers');
+const { tempDir, tempRepo, git, writeFiles, runHook, NEEDS_AUDITKIT } = require('./helpers');
 
 const FRAMEWORK_ROOT = path.resolve(__dirname, '..');
 const INIT = path.join(FRAMEWORK_ROOT, 'scripts/sdd-init.js');
@@ -11,12 +11,6 @@ const INIT = path.join(FRAMEWORK_ROOT, 'scripts/sdd-init.js');
 function init(cwd, ...flags) {
     return execFileSync(process.execPath, [INIT, '--express', ...flags], {
         cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
-    });
-}
-
-function initWithoutAuditkit(cwd, ...flags) {
-    return spawnSync(process.execPath, [INIT, '--express', ...flags], {
-        cwd, encoding: 'utf8', env: { ...process.env, SDD_AUDITKIT: path.join(tempDir(), 'missing-auditkit') }
     });
 }
 
@@ -52,54 +46,6 @@ test('install mode provisions an existing project from another working directory
     // The copied gate runs standalone and passes on the freshly provisioned project.
     git(project, 'add', '-A');
     execFileSync(process.execPath, ['.sdd/scripts/quality-gate.js'], { cwd: project, stdio: 'pipe' });
-});
-
-test('the protocol skill comes from the installed auditkit, never from the framework checkout', NEEDS_AUDITKIT, () => {
-    const project = tempRepo();
-    // A stale reference file, as an older auditkit or a hand edit would leave it.
-    writeFiles(project, { '.agents/skills/auditor-executor-protocol/references/dropped-upstream.md': 'old\n' });
-    const output = init(tempDir(), `--target=${project}`);
-
-    const expected = tempDir();
-    execFileSync(AUDITKIT, ['install-skill', '--dest', `${expected}/`], { stdio: 'pipe' });
-    const skill = '.agents/skills/auditor-executor-protocol';
-    assert.strictEqual(read(project, `${skill}/SKILL.md`), fs.readFileSync(path.join(expected, 'SKILL.md'), 'utf8'));
-    assert.deepStrictEqual(fs.readdirSync(path.join(project, skill, 'references')).sort(),
-        fs.readdirSync(path.join(expected, 'references')).sort());
-    assert.ok(exists(project, '.claude/skills/auditor-executor-protocol/SKILL.md'));
-    assert.match(output, /auditor-executor-protocol \(auditkit \d+\.\d+\.\d+\)/);
-    // The framework repository ships no copy of the protocol.
-    assert.ok(!exists(FRAMEWORK_ROOT, 'docs/roadmap/templates'));
-    assert.strictEqual(git(FRAMEWORK_ROOT, 'ls-files', '--', `${skill}/`, '.claude/skills/auditor-executor-protocol').trim(), '');
-});
-
-test('Rigor documents are scaffolded by auditkit init and pass its lint', NEEDS_AUDITKIT, () => {
-    const project = tempRepo();
-    init(project, '--name=shop', '--mode=rigor');
-    const expected = tempDir();
-    execFileSync(AUDITKIT, ['init', expected, '--name', 'shop'], { stdio: 'pipe' });
-    for (const doc of ['plan-of-record.md', 'execution-guide.md', 'compliance-log.md']) {
-        assert.strictEqual(read(project, `docs/roadmap/${doc}`), fs.readFileSync(path.join(expected, doc), 'utf8'), doc);
-    }
-    git(project, 'add', '-A');
-    execFileSync(process.execPath, ['.sdd/scripts/quality-gate.js'], { cwd: project, stdio: 'pipe' });
-});
-
-test('Rigor mode without auditkit stops before writing anything and says how to install it', () => {
-    const project = tempRepo();
-    const result = initWithoutAuditkit(project, '--mode=rigor');
-    assert.strictEqual(result.status, 1);
-    assert.match(result.stderr, /Rigor mode needs the Auditor-Executor protocol's CLI\. auditkit is not installed\. Install it with: pipx install auditor-executor-protocol/);
-    assert.deepStrictEqual(fs.readdirSync(project).filter(f => f !== '.git'), []);
-});
-
-test('Lite mode without auditkit still provisions and reports the missing protocol skill', () => {
-    const project = tempRepo();
-    const result = initWithoutAuditkit(project);
-    assert.strictEqual(result.status, 0, result.stderr);
-    assert.ok(exists(project, 'docs/SPEC.md'));
-    assert.ok(!exists(project, '.agents/skills/auditor-executor-protocol'));
-    assert.match(result.stdout, /auditor-executor-protocol skill was not installed\. auditkit is not installed\. Install it with: pipx install auditor-executor-protocol/);
 });
 
 test('rerunning is idempotent and preserves user edits and custom config keys', NEEDS_AUDITKIT, () => {

@@ -47,8 +47,8 @@ const TEMPLATES = [
     'docs/guides/GITHUB_CLI_SETUP.md',
     'docs/guidelines/AST_NAVIGATION.md'
 ];
-// Installed by `auditkit install-skill`; a local copy in a framework checkout is never shipped.
-const PROTOCOL_SKILL = 'auditor-executor-protocol';
+// Written by auditkit (lib/auditkit.js syncSkill); a copy in a framework checkout is never shipped.
+const PROTOCOL_SKILL = auditkit.SKILL;
 const ICONS = { created: '✅', updated: '🔄', linked: '🔗', copied: '📄', kept: '⏭️ ', skipped: '⚠️ ', unchanged: '⏭️ ' };
 
 // String.prototype.replace would interpret "$5" in answers like "$5 VPS".
@@ -284,17 +284,13 @@ function provision(rawAnswers, { target = process.cwd(), force = false, log = co
         record('copied', 'templates and guides referenced by the skills');
     }
 
-    // Protocol skill: owned by auditkit and refreshed on every run, so the project always
-    // carries the protocol version of the auditkit installed here.
+    // Protocol skill: owned by auditkit, kept out of git and rewritten from the installed
+    // auditkit whenever it differs (here and on every gate run).
     const protocolSkill = `.agents/skills/${PROTOCOL_SKILL}`;
-    if (protocol.ok) {
-        // Remove first so reference files dropped upstream do not linger.
-        fs.rmSync(at(protocolSkill), { recursive: true, force: true });
-        auditkit.run(['install-skill', root, '--agent', 'antigravity', '--force']);
-        record('updated', `${protocolSkill} (auditkit ${protocol.version})`);
-    } else {
-        record('skipped', `${protocolSkill}: ${protocol.problem}`);
-    }
+    const synced = auditkit.syncSkill(root);
+    if (synced.status === 'skipped') record('skipped', `${protocolSkill}: ${synced.problem}`);
+    else record(synced.status === 'updated' ? 'updated' : 'unchanged', `${protocolSkill} (auditkit ${synced.version})`);
+    ensureGitignoreEntries(at, record, auditkit.SKILL_PATHS);
 
     // 2. Capability manifest.
     const configPath = at('sdd.config.json');
