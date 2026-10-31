@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const { execFileSync, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { tempDir, tempRepo, git, writeFiles, runHook } = require('./helpers');
+const { tempDir, tempRepo, git, writeFiles, runHook, NEEDS_AUDITKIT } = require('./helpers');
 
 const FRAMEWORK_ROOT = path.resolve(__dirname, '..');
 const INIT = path.join(FRAMEWORK_ROOT, 'scripts/sdd-init.js');
@@ -32,7 +32,6 @@ test('install mode provisions an existing project from another working directory
     assert.match(read(project, 'AGENTS.md'), /node \.sdd\/scripts\/quality-gate\.js/);
     assert.match(read(project, 'AGENTS.md'), /node \.sdd\/scripts\/sdd-verify\.js --record/);
     assert.ok(exists(project, '.sdd/scripts/check-spec.js'));
-    assert.ok(exists(project, 'docs/roadmap/templates/execution-guide.md'));
     assert.match(read(project, 'CLAUDE.md'), /^@\.agents\/AGENTS\.md$/m);
     assert.match(read(project, '.agents/CONTEXT.md'), /\*\*Primary Runtime:\*\* go-1\.23/);
     assert.match(read(project, 'docs/decisions/ADR-0001-stack-and-architecture.md'), /Hardware and Deployment:\*\* \$5 VPS/);
@@ -49,7 +48,7 @@ test('install mode provisions an existing project from another working directory
     execFileSync(process.execPath, ['.sdd/scripts/quality-gate.js'], { cwd: project, stdio: 'pipe' });
 });
 
-test('rerunning is idempotent and preserves user edits and custom config keys', () => {
+test('rerunning is idempotent and preserves user edits and custom config keys', NEEDS_AUDITKIT, () => {
     const project = tempRepo();
     init(project, '--name=app');
     fs.appendFileSync(path.join(project, '.agents/AGENTS.md'), '\n## 9. Custom rule\n');
@@ -144,7 +143,7 @@ test('F7: an invalid existing config stops sdd-init with the exact problems', ()
     assert.throws(() => init(project), /architecture\.maxLocPerFle: unknown key/);
 });
 
-test('F59: sdd-init rejects unknown flags and accepts "--flag value"', () => {
+test('F59: sdd-init rejects unknown flags and accepts "--flag value"', NEEDS_AUDITKIT, () => {
     const project = tempRepo();
     assert.throws(() => init(project, '--mdoe=rigor'), /Unknown flag "--mdoe=rigor"/);
     const target = tempRepo();
@@ -153,7 +152,7 @@ test('F59: sdd-init rejects unknown flags and accepts "--flag value"', () => {
     assert.ok(!exists(project, 'AGENTS.md'));
 });
 
-test('F72: install mode records the tooling version; F77: entry point follows roadmapDir', () => {
+test('F72: install mode records the tooling version; F77: entry point follows roadmapDir', NEEDS_AUDITKIT, () => {
     const project = tempRepo();
     writeFiles(project, { 'sdd.config.json': JSON.stringify({ specification: { roadmapDir: 'plans' } }) });
     init(project, '--mode=rigor');
@@ -191,7 +190,7 @@ test('F60: --force refreshes copied .claude/skills directories', () => {
     assert.strictEqual(fs.readFileSync(path.join(own, 'SKILL.md'), 'utf8'), 'my own skill');
 });
 
-test('N9: re-running sdd-init keeps the answers stored in sdd.config.json; explicit flags win', () => {
+test('N9: re-running sdd-init keeps the answers stored in sdd.config.json; explicit flags win', NEEDS_AUDITKIT, () => {
     const project = tempRepo();
     init(project, '--name=shop', '--runtime=go-1.23', '--mode=rigor', '--ast=ripgrep', '--hardware=serverless', '--i18n');
     init(project);
@@ -205,7 +204,7 @@ test('N9: re-running sdd-init keeps the answers stored in sdd.config.json; expli
     assert.deepStrictEqual([config.project.name, config.project.runtime], ['shop', 'python-3.12']);
 });
 
-test('N10: the spec and Rigor documents are created at the configured paths', () => {
+test('N10: the spec and Rigor documents are created at the configured paths', NEEDS_AUDITKIT, () => {
     const lite = tempRepo();
     writeFiles(lite, { 'sdd.config.json': JSON.stringify({ specification: { specFile: 'specs/CURRENT.md' } }) });
     init(lite);
@@ -222,7 +221,7 @@ test('N10: the spec and Rigor documents are created at the configured paths', ()
     assert.ok(!exists(rigor, 'docs/roadmap/execution-guide.md'));
 });
 
-test('R12: next steps name the configured spec and roadmap paths', () => {
+test('R12: next steps name the configured spec and roadmap paths', NEEDS_AUDITKIT, () => {
     const lite = tempRepo();
     writeFiles(lite, { 'sdd.config.json': JSON.stringify({ specification: { specFile: 'specs/FEATURE.md' } }) });
     assert.match(init(lite), /Define your tasks in specs\/FEATURE\.md/);

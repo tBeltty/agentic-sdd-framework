@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Install a specific release
 with `npx github:tBeltty/agentic-sdd-framework#v<version>`.
 
+## [Unreleased]
+
+### Changed
+- **Breaking:** the Auditor-Executor protocol is an external dependency. The framework no
+  longer ships copies of its skill (`.agents/skills/auditor-executor-protocol/`, the
+  `.claude/skills` link) or its Rigor templates (`docs/roadmap/templates/`). `sdd-init`
+  scaffolds Rigor documents with `auditkit init`.
+- The protocol skill in a project is gitignored and kept in sync with the installed `auditkit`:
+  `sdd-init` and every quality gate run (any mode, pre-push included) rewrite it whenever it
+  differs, so `pipx upgrade auditor-executor-protocol` reaches the project with no other step.
+  This step never fails the gate. A project that committed the skill under an earlier version
+  keeps it untouched until it runs `git rm -r --cached .agents/skills/auditor-executor-protocol
+  .claude/skills/auditor-executor-protocol` and reruns `sdd-init`; the gate prints that command.
+- `auditkit` is installed from PyPI (`pipx install auditor-executor-protocol`). The minimum is
+  0.5.1, the first release whose scaffolded execution guide passes its own `lint`; there is
+  no upper bound.
+- Rigor mode without `auditkit` (or with one older than 0.5.1) stops `sdd-init` before it
+  writes anything. Lite mode provisions as before and reports that the skill was skipped.
+- CI installs the latest `auditkit` from PyPI instead of a pinned Git tag.
+
+### Removed
+- `scripts/dev/sync-vendored.js` and the CI step that compared the vendored copies with a
+  pinned protocol release.
+
 ## [1.6.0] - 2026-09-28
 
 ### Added

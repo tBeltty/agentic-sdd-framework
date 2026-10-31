@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { parseSpec, withLastVerified, withTaskEvidence, formatLastVerified } = require('../scripts/lib/spec');
 const { lintLiteSpec, parseVersion, versionAtLeast, MIN_AUDITKIT, run: checkSpec } = require('../scripts/check-spec');
-const { tempRepo, git, writeFiles } = require('./helpers');
+const { tempDir, tempRepo, git, writeFiles, AUDITKIT, hasAuditkit, NEEDS_AUDITKIT } = require('./helpers');
 const { TEMPLATE, spec, ALL } = require('./spec-fixtures');
 
 const lint = (text, options) => lintLiteSpec(text, options).problems;
@@ -179,26 +179,31 @@ test('bracketed shell tests are commands, not placeholders; fenced indentation i
 
 test('F75: auditkit version comparison', () => {
     assert.deepStrictEqual(parseVersion('auditkit 0.3.0\n'), [0, 3, 0]);
-    assert.strictEqual(versionAtLeast([0, 2, 9], MIN_AUDITKIT), false);
-    assert.strictEqual(versionAtLeast([0, 3, 7], MIN_AUDITKIT), false);
-    assert.strictEqual(versionAtLeast([0, 3, 8], MIN_AUDITKIT), false);
-    assert.strictEqual(versionAtLeast([0, 3, 9], MIN_AUDITKIT), true);
+    assert.deepStrictEqual(MIN_AUDITKIT, [0, 5, 1]);
+    assert.strictEqual(versionAtLeast([0, 3, 9], MIN_AUDITKIT), false);
+    assert.strictEqual(versionAtLeast([0, 5, 0], MIN_AUDITKIT), false);
+    assert.strictEqual(versionAtLeast([0, 5, 1], MIN_AUDITKIT), true);
+    assert.strictEqual(versionAtLeast([0, 6, 0], MIN_AUDITKIT), true);
     assert.strictEqual(versionAtLeast([1, 0, 0], MIN_AUDITKIT), true);
 });
 
-// Rigor mode delegates to auditkit. SDD_AUDITKIT points at a specific binary in tests;
-// the positive cases are skipped when auditkit is not installed.
-const AUDITKIT = process.env.SDD_AUDITKIT || 'auditkit';
-const hasAuditkit = !spawnSync(AUDITKIT, ['--version']).error;
+// Rigor mode delegates to auditkit; the documents come from `auditkit init`, so the
+// positive cases are skipped when auditkit is not installed.
+function scaffold() {
+    const dir = tempDir();
+    if (hasAuditkit) spawnSync(AUDITKIT, ['init', dir, '--name', 'app']);
+    const doc = name => (hasAuditkit ? fs.readFileSync(path.join(dir, name), 'utf8') : `# ${name}\n`);
+    return { plan: doc('plan-of-record.md'), guide: doc('execution-guide.md'), log: doc('compliance-log.md') };
+}
 
 function rigorProject(log) {
     const repo = tempRepo();
-    const templates = path.join(__dirname, '../docs/roadmap/templates');
+    const docs = scaffold();
     writeFiles(repo, {
         'sdd.config.json': JSON.stringify({ specification: { mode: 'rigor' } }),
-        'docs/roadmap/plan-of-record.md': fs.readFileSync(path.join(templates, 'plan-of-record.md'), 'utf8'),
-        'docs/roadmap/execution-guide.md': fs.readFileSync(path.join(templates, 'execution-guide.md'), 'utf8'),
-        'docs/roadmap/compliance-log.md': log || fs.readFileSync(path.join(templates, 'compliance-log.md'), 'utf8')
+        'docs/roadmap/plan-of-record.md': docs.plan,
+        'docs/roadmap/execution-guide.md': docs.guide,
+        'docs/roadmap/compliance-log.md': log || docs.log
     });
     git(repo, 'add', '-A');
     return repo;
@@ -217,31 +222,29 @@ function withAuditkit(bin, fn) {
 test('rigor mode reports a missing auditkit with install instructions', () => {
     const result = withAuditkit('/nonexistent/auditkit', () => checkSpec({ root: rigorProject() }));
     assert.strictEqual(result.ok, false);
-    assert.match(result.report, /pipx install git\+https:\/\/github\.com\/tBeltty\/auditor-executor-protocol/);
+    assert.match(result.report, /auditkit is not installed\. Install it with: pipx install auditor-executor-protocol/);
 });
 
 test('F75: rigor mode rejects an auditkit older than the minimum', { skip: process.platform === 'win32' && 'uses a shell-script stub' }, () => {
     const stub = path.join(tempRepo(), 'auditkit');
-    fs.writeFileSync(stub, '#!/bin/sh\necho "auditkit 0.3.7"\n', { mode: 0o755 });
+    fs.writeFileSync(stub, '#!/bin/sh\necho "auditkit 0.5.0"\n', { mode: 0o755 });
     const result = withAuditkit(stub, () => checkSpec({ root: rigorProject() }));
     assert.strictEqual(result.ok, false);
-    assert.match(result.report, /older than 0\.3\.9/);
+    assert.match(result.report, /older than 0\.5\.1, which this framework requires\. Upgrade with: pipx upgrade auditor-executor-protocol/);
 });
 
-test('rigor mode passes fresh templates and rejects DONE without evidence', { skip: !hasAuditkit && 'auditkit not installed' }, () => {
+test('rigor mode passes fresh templates and rejects DONE without evidence', NEEDS_AUDITKIT, () => {
     assert.strictEqual(checkSpec({ root: rigorProject() }).ok, true);
-    const templates = path.join(__dirname, '../docs/roadmap/templates');
-    const log = fs.readFileSync(path.join(templates, 'compliance-log.md'), 'utf8').replace('### P0-T1 — PENDING', '### P0-T1 — DONE');
+    const log = scaffold().log.replace('### P0-T1 — PENDING', '### P0-T1 — DONE');
     const result = checkSpec({ root: rigorProject(log) });
     assert.strictEqual(result.ok, false);
     assert.match(result.report, /done without evidence/);
 });
 
-test('F61: rigor mode lints the staged documents, not the working tree', { skip: !hasAuditkit && 'auditkit not installed' }, () => {
-    const templates = path.join(__dirname, '../docs/roadmap/templates');
-    const badLog = fs.readFileSync(path.join(templates, 'compliance-log.md'), 'utf8').replace('### P0-T1 — PENDING', '### P0-T1 — DONE');
-    const repo = rigorProject(badLog);
-    writeFiles(repo, { 'docs/roadmap/compliance-log.md': fs.readFileSync(path.join(templates, 'compliance-log.md'), 'utf8') });
+test('F61: rigor mode lints the staged documents, not the working tree', NEEDS_AUDITKIT, () => {
+    const clean = scaffold().log;
+    const repo = rigorProject(clean.replace('### P0-T1 — PENDING', '### P0-T1 — DONE'));
+    writeFiles(repo, { 'docs/roadmap/compliance-log.md': clean });
     assert.strictEqual(checkSpec({ root: repo }).ok, true, 'working tree is clean');
     assert.strictEqual(checkSpec({ root: repo, source: { kind: 'index' } }).ok, false, 'index has DONE without evidence');
 });

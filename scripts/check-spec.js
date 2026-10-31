@@ -30,9 +30,8 @@ const { loadConfig, getIn } = require('./lib/config');
 const { runCheckCli } = require('./lib/cli');
 const { parseSpec } = require('./lib/spec');
 const { stateOf, referenceSourceFor } = require('./lib/state');
-
-const AUDITKIT_INSTALL = 'pipx install git+https://github.com/tBeltty/auditor-executor-protocol';
-const MIN_AUDITKIT = [0, 3, 9];
+const auditkit = require('./lib/auditkit');
+const { MIN_AUDITKIT, parseVersion, versionAtLeast } = auditkit;
 
 function lintLiteSpec(text, { requireRecordedEvidence = false, expectedState = null, shallow = false } = {}) {
     const spec = parseSpec(text);
@@ -88,31 +87,9 @@ function lintLiteSpec(text, { requireRecordedEvidence = false, expectedState = n
     return { status: shownStatus, spec, problems, notes };
 }
 
-function parseVersion(text) {
-    const match = String(text).match(/(\d+)\.(\d+)\.(\d+)/);
-    return match ? match.slice(1).map(Number) : null;
-}
-
-function versionAtLeast(actual, minimum) {
-    for (let i = 0; i < 3; i++) {
-        if (actual[i] !== minimum[i]) return actual[i] > minimum[i];
-    }
-    return true;
-}
-
 function runAuditkit(root, roadmapDir, source) {
-    const bin = process.env.SDD_AUDITKIT || 'auditkit';
-    const version = spawnSync(bin, ['--version'], { encoding: 'utf8' });
-    if (version.error) {
-        return { ok: false, report: `❌ Rigor mode is checked by auditkit, which is not installed.\nInstall it with: ${AUDITKIT_INSTALL}` };
-    }
-    const actual = parseVersion(version.stdout);
-    if (!actual || !versionAtLeast(actual, MIN_AUDITKIT)) {
-        return {
-            ok: false,
-            report: `❌ auditkit ${actual ? actual.join('.') : '(unknown version)'} is older than ${MIN_AUDITKIT.join('.')}, which this gate requires.\nUpgrade with: pipx install --force git+https://github.com/tBeltty/auditor-executor-protocol`
-        };
-    }
+    const installed = auditkit.check();
+    if (!installed.ok) return { ok: false, report: `❌ Rigor mode is checked by auditkit. ${installed.problem}` };
 
     // auditkit reads files from disk; for the index or a commit, lint a temporary copy.
     let dir = path.join(root, roadmapDir);
@@ -130,7 +107,7 @@ function runAuditkit(root, roadmapDir, source) {
         dir = tmp;
     }
     try {
-        const result = spawnSync(bin, ['lint', dir], { cwd: root, encoding: 'utf8' });
+        const result = spawnSync(auditkit.bin(), ['lint', dir], { cwd: root, encoding: 'utf8' });
         const output = `${result.stdout || ''}${result.stderr || ''}`.trim();
         return {
             ok: result.status === 0,
